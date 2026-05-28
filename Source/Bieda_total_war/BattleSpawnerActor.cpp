@@ -175,6 +175,24 @@ void ABattleSpawnerActor::SpawnAgents()
 		VF.FormationRow  = Row;
 		VF.FormationCol  = Col;
 
+		// Per-soldier personality — disciplined for line infantry, sloppy for militia
+		if (UnitType == EUnitType::LineInfantry)
+		{
+			VF.PersonalSlotTolerance    = FMath::FRandRange(15.f,  80.f);
+			VF.PersonalSnapTime         = FMath::FRandRange( 1.5f,  2.5f);
+			VF.PersonalDriftAmp         = FMath::FRandRange( 0.5f,  3.f);
+			VF.PersonalWaverAmp         = FMath::FRandRange( 0.005f, 0.03f);
+			VF.PersonalSeparationRadius = FMath::FRandRange(80.f, 120.f);
+		}
+		else  // Militia
+		{
+			VF.PersonalSlotTolerance    = FMath::FRandRange(80.f, 200.f);
+			VF.PersonalSnapTime         = FMath::FRandRange( 2.f,   4.f);
+			VF.PersonalDriftAmp         = FMath::FRandRange(10.f,  30.f);
+			VF.PersonalWaverAmp         = FMath::FRandRange( 0.06f, 0.15f);
+			VF.PersonalSeparationRadius = FMath::FRandRange(120.f, 180.f);
+		}
+
 		// Organic curve: sin-based arc + per-entity wobble
 		{
 			const float ColNorm = (EffectiveRowSize > 1)

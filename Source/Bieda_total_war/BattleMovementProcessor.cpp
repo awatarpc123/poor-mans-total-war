@@ -6,9 +6,10 @@
 
 namespace
 {
-	// Agents within this distance push each other apart
-	constexpr float SeparationRadius   = 150.f;   // cm  (~1.5x capsule diameter)
-	constexpr float SeparationStrength = 250.f;   // cm/s repulsion at contact distance
+	// Maximum separation radius — used for spatial grid query.
+	// Each soldier uses its own VF.PersonalSeparationRadius (≤ this max).
+	constexpr float MaxSeparationRadius = 200.f;  // cm
+	constexpr float SeparationStrength  = 250.f;  // cm/s repulsion at contact distance
 }
 
 UBattleMovementProcessor::UBattleMovementProcessor()
@@ -54,7 +55,7 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 	});
 
 	FBattleSpatialGrid Grid;
-	Grid.Build(Positions, SeparationRadius);
+	Grid.Build(Positions, MaxSeparationRadius);
 
 	// -----------------------------------------------------------------------
 	// Pass 2: compute movement + separation + wavering and apply
@@ -85,8 +86,10 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			const float   Morale     = Morales[i].Morale;
 
 			// ── Separation force (spatial grid query) ─────────────────────
+			// Each soldier uses its own personal space radius (set at spawn).
+			const float PersonalSepRadius = Velocities[i].PersonalSeparationRadius;
 			FVector Separation = FVector::ZeroVector;
-			Grid.ForEachInRadius(CurrentPos, SeparationRadius, GlobalIdx,
+			Grid.ForEachInRadius(CurrentPos, PersonalSepRadius, GlobalIdx,
 				[&](int32 j, float DistSq2D)
 				{
 					if (Snaps[j].bDead) return;
@@ -94,7 +97,7 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 					if (Dist > 1.f)
 					{
 						const FVector Diff = CurrentPos - Positions[j];
-						const float Weight = 1.f - (Dist / SeparationRadius);
+						const float Weight = 1.f - (Dist / PersonalSepRadius);
 						Separation += Diff.GetSafeNormal2D() * Weight * SeparationStrength;
 					}
 				});
@@ -179,7 +182,7 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			const FVector ToTarget = Orders[i].TargetPosition - CurrentPos;
 			const float   DistToSlot = ToTarget.Size2D();
 
-			if (DistToSlot > StopDistance)
+			if (DistToSlot > Velocities[i].PersonalSlotTolerance)
 			{
 				const FVector Dir = ToTarget.GetSafeNormal2D();
 				const bool bIsLine = (Velocities[i].UnitType == EUnitType::LineInfantry);
@@ -188,8 +191,6 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 				// Priority 1: bIsStraggler  → CatchUpSpeed (auto, NCO grabbed him)
 				// Priority 2: bForceRun     → RunSpeed (UI: Bieg)
 				// Priority 3: default       → MarchSpeed (UI: Marsz)
-				// The whole formation moves at the player's chosen pace; catch-up
-				// only applies to individual soldiers tagged as stragglers.
 				float BaseSpeed;
 				if (Velocities[i].bIsStraggler)
 				{
@@ -204,21 +205,18 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 					BaseSpeed = Velocities[i].MarchSpeed;
 				}
 
-				// ── Speed wavering ────────────────────────────────────────
-				// Line: tight ±4%, Militia: loose ±12%
-				const float WaverAmp = bIsLine ? 0.04f : 0.12f;
+				// ── Speed wavering — per-soldier amplitude ────────────────
+				const float WaverAmp = Velocities[i].PersonalWaverAmp;
 				const float SpeedMul = 1.0f + WaverAmp * FMath::Sin(
 					WorldTime * (0.7f + Seed * 0.6f) + Seed * 6.28f);
 
-				// ── Lateral drift ──────────────────────────────────────────
-				// Line: tiny ±5cm, Militia: ±20cm
+				// ── Lateral drift — per-soldier amplitude ─────────────────
 				const FVector LateralDir(-Dir.Y, Dir.X, 0.f);
-				const float DriftAmp = bIsLine ? 5.f : 20.f;
+				const float DriftAmp = Velocities[i].PersonalDriftAmp;
 				const float LateralDrift = DriftAmp * FMath::Sin(
 					WorldTime * (0.4f + Seed * 0.3f) + Seed * 4.71f);
 
 				// ── Formation curve offset (line infantry) ────────────────
-				// Push soldier perpendicular to march dir by their curve offset
 				const float CurveAdj = bIsLine ? Velocities[i].CurveOffset : 0.f;
 
 				const FVector Desired = Dir * BaseSpeed * SpeedMul
@@ -236,8 +234,18 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			}
 			else
 			{
-				// Near target — bleed off velocity, still separate + fidget
-				const FVector DesiredVel = Separation + FidgetOffset * 2.f;
+				// ── Within personal tolerance: snap-to-slot soft drift ────
+				// Soldier slowly drifts toward exact slot position over PersonalSnapTime,
+				// so the line tightens up after the formation halts instead of leaving
+				// each man stopped wherever he happened to cross his tolerance.
+				FVector DesiredVel = Separation + FidgetOffset * 2.f;
+				if (DistToSlot > 5.f && Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
+				{
+					const FVector SnapVel = ToTarget.GetSafeNormal2D()
+						* (DistToSlot / Velocities[i].PersonalSnapTime);
+					DesiredVel += SnapVel;
+				}
+
 				Velocities[i].Velocity = FMath::VInterpTo(
 					Velocities[i].Velocity, DesiredVel, DeltaTime, 5.f);
 

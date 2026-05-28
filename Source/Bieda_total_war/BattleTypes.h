@@ -81,6 +81,14 @@ struct BIEDA_TOTAL_WAR_API FAgentVelocityFragment : public FMassFragment
 	bool  bForceRun      = false;   // UI state: false=Marsz, true=Bieg
 	bool  bIsStraggler   = false;   // Set true when soldier falls far behind formation
 
+	// ── Per-soldier "personality" — randomized once at spawn, sticks for life ──
+	// These break the uniform-robot look without making the line look like chaos.
+	float PersonalSlotTolerance    = 100.f;  // cm — how close to slot before he "stops"
+	float PersonalSnapTime         =   2.f;  // sec — drift time toward exact slot after stopping
+	float PersonalDriftAmp         =   5.f;  // cm — amplitude of lateral wavering while marching
+	float PersonalWaverAmp         =   0.04f;// fraction — speed wavering ±N%
+	float PersonalSeparationRadius = 150.f;  // cm — personal space (separation query radius)
+
 	// ── Formation slot info (set by spawner) ────────────────────────────────
 	int32 FormationRow  = 0;       // row index (0 = front)
 	int32 FormationCol  = 0;       // column index in row
