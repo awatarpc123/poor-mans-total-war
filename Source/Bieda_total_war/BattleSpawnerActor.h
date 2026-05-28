@@ -1,0 +1,223 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "Components/SceneComponent.h"
+#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "MassEntityHandle.h"
+#include "MassEntityManager.h"
+#include "BattleTypes.h"
+#include "BattleSpawnerActor.generated.h"
+
+UCLASS()
+class BIEDA_TOTAL_WAR_API ABattleSpawnerActor : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ABattleSpawnerActor();
+
+	/** Unit type: Militia (loose, free fire) or Line Infantry (tight formation, volleys). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	EUnitType UnitType = EUnitType::Militia;
+
+	/** Firing mode: FreeFire (individual), SquadVolley (all at once), RankFire (row by row). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	EVolleyMode VolleyMode = EVolleyMode::FreeFire;
+
+	/** March speed (cm/s) — orderly walk in formation. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "50", ClampMax = "500"))
+	float MarchSpeed = 200.f;
+
+	/** Run speed (cm/s) — fast advance, player picks this from UI. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "100", ClampMax = "700"))
+	float RunSpeed = 400.f;
+
+	/** Catch-up speed (cm/s) — automatic sprint when soldier falls behind formation slot.
+	 *  Not exposed in UI; triggers itself when soldier is far from their slot. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "300", ClampMax = "1000"))
+	float CatchUpSpeed = 600.f;
+
+	/** Organic curve: how much the formation line bends (cm). 0 = ruler-straight. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "0", ClampMax = "200"))
+	float FormationCurveStrength = 40.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
+	int32 NumAgents = 50;
+
+	/** Soldiers per row. 0 = auto (square root of NumAgents). For Line Infantry try 10-25. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn", meta = (ClampMin = "0", ClampMax = "100"))
+	int32 RowSize = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
+	float SpawnSpacing = 120.f;
+
+	/** Initial facing of all soldiers. Set Yaw = 180 for enemy formations facing the player. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
+	FRotator SpawnFacing = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
+	float InitialMorale = 80.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Target")
+	FVector TargetPosition = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Officer")
+	bool bSpawnOfficer = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Officer")
+	float OfficerInitialMorale = 95.f;
+
+	/** Number of NCOs (podoficerów) per squad. They chase stragglers and help rally. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|NCO", meta = (ClampMin = "0", ClampMax = "6"))
+	int32 NumNCOs = 2;
+
+	// ── Combat stats (per-spawner override) ─────────────────────────────────
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
+	float SoldierHP = 100.f;
+
+	/** Base accuracy (0.0–1.0). Randomized ±25% per soldier at spawn. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
+	float SoldierAccuracy = 0.15f;
+
+	/** Seconds to reload musket. Randomized ±20% per soldier at spawn. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
+	float SoldierReloadTime = 15.f;
+
+	/** Musket range in cm. 5000 = ~50 m. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
+	float SoldierFireRange = 5000.f;
+
+	/** Half-angle of the vision/fire cone (degrees). 90 = semicircle (180° FOV). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat", meta = (ClampMin = "10", ClampMax = "180"))
+	float VisionHalfAngleDeg = 90.f;
+
+	/** 0 = player, 1 = enemy, etc. Assigned to every entity via FFactionFragment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Faction")
+	uint8 TeamId = 0;
+
+	// ── Debug visualization ─────────────────────────────────────────────────
+	/** Show fire range arc and facing arrow for this squad. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
+	bool bShowFireRange = true;
+
+	// ── Visual representation (ISM) ─────────────────────────────────────────
+	/** Mesh for soldiers. If nullptr, uses engine cylinder placeholder. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UStaticMesh> SoldierMesh = nullptr;
+
+	/** Material for alive soldiers. If nullptr, uses mesh default material. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UMaterialInterface> SoldierMaterial = nullptr;
+
+	/** Material for dead soldiers. If nullptr, uses a dark gray fallback. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UMaterialInterface> DeadSoldierMaterial = nullptr;
+
+	/** Mesh for officer. If nullptr, uses SoldierMesh or cylinder. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UStaticMesh> OfficerMesh = nullptr;
+
+	/** Mesh for NCOs. If nullptr, uses SoldierMesh or cylinder. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UStaticMesh> NCOMesh = nullptr;
+
+	/**
+	 * Issue a move order with optional formation change.
+	 * Clears any active engagement.
+	 * @param NewWorldTarget  Center of the formation at destination
+	 * @param InRowSize       Soldiers per front-line row (-1 = keep current)
+	 * @param InFrontLineDir  Direction of the front line (zero = auto from center→target)
+	 */
+	void IssueMoveOrder(const FVector& NewWorldTarget, int32 InRowSize = -1,
+		const FVector& InFrontLineDir = FVector::ZeroVector);
+
+	/**
+	 * Engage an enemy squad — auto-approach, stop at fire range, chase if enemy moves.
+	 * Cleared by a ground move order (IssueMoveOrder).
+	 */
+	void IssueEngageOrder(ABattleSpawnerActor* EnemySquad);
+
+	/** Stop all soldiers in place — clears current movement & engagement.
+	 *  Called when the player starts a new click/drag interaction. */
+	void HoldPosition();
+
+	/** Average world position of all living soldiers (used for selection). */
+	FVector GetFormationCenter() const;
+
+	/** Are there any alive soldiers? (used by engagement system). */
+	bool HasAliveSoldiers() const;
+
+	/** Currently engaged enemy (nullptr = none). */
+	ABattleSpawnerActor* GetEngagedTarget() const { return EngagedTarget; }
+
+	/** Current soldiers-per-row in the formation (used for preview). */
+	int32 GetCurrentRowSize() const { return CurrentRowSize; }
+
+	// ── UI getters ──────────────────────────────────────────────────────────
+	int32 GetAliveCount() const;
+	float GetAverageMorale() const;
+	FString GetDominantStateString() const;
+
+	// ── Runtime commands (called from UI / keyboard) ────────────────────────
+	void SetVolleyModeRuntime(EVolleyMode NewMode);
+	void SetForceRun(bool bRun);
+
+	/** Force-run flag: all soldiers use RunSpeed regardless of distance to slot. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|Unit")
+	bool bForceRun = false;
+
+	virtual void Tick(float DeltaSeconds) override;
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	TArray<FMassEntityHandle> SpawnedEntities;   // soldiers only
+	FMassEntityHandle OfficerEntity;              // officer (invalid if not spawned)
+	TArray<FMassEntityHandle> NCOEntities;        // NCOs
+	uint8 MySquadId = 0;
+	int32 CurrentRowSize = -1;   // set at spawn, updated by drag-to-form
+	void SpawnAgents();
+
+	// ── Engagement ──────────────────────────────────────────────────────────
+	UPROPERTY()
+	TObjectPtr<ABattleSpawnerActor> EngagedTarget;
+
+	FVector LastEngageEnemyPos = FVector::ZeroVector;   // throttle re-orders
+	void UpdateEngagement();
+	void SetFaceTargetOnSoldiers(const FVector& WorldTarget);
+	void ClearFaceTarget();
+
+	// ── Volley coordination ─────────────────────────────────────────────────
+	int32 CurrentVolleyRank = 0;   // for RankFire: which row fires next
+	void UpdateVolley();
+
+	// ── Straggler detection ─────────────────────────────────────────────────
+	// Flags soldiers that have fallen far behind the formation centroid so
+	// the movement processor can apply CatchUpSpeed for them.
+	void UpdateStragglers();
+
+	// ── Visualization ───────────────────────────────────────────────────────
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SoldierHISM;
+
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DeadSoldierHISM;
+
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> OfficerHISM;
+
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> NCOHISM;
+
+	void SetupVisualization();
+	void UpdateVisualization();
+
+	UStaticMesh* GetFallbackMesh() const;
+	UHierarchicalInstancedStaticMeshComponent* CreateHISM(
+		FName Name, UStaticMesh* Mesh, UMaterialInterface* Material);
+
+	/** Draw fire-range arc and facing arrow (called from UpdateVisualization). */
+	void DrawFireRangeArc(const FMassEntityManager& EM);
+};

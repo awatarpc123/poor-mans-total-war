@@ -1,0 +1,36 @@
+# ── Visual Studio / Rider ────────────────────────────────────────────────────
+.vs/
+.idea/
+.vscode/
+*.suo
+*.user
+*.userprefs
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# ── UE5 generated / cache ────────────────────────────────────────────────────
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# ── Plugin/engine artefacts ──────────────────────────────────────────────────
+*.opendb
+*.tlog
+*.lastbuildstate
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Local backups (snapshots before major refactors — too large to track) ────
+_backup_*/
+
+# ── Local Claude Code settings ───────────────────────────────────────────────
+.claude/
