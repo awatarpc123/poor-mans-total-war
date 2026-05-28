@@ -240,6 +240,7 @@ void ABattleSpawnerActor::SpawnAgents()
 		OFF.bJustDied           = false;
 		OFF.FormationFrontPos   = OfficerPos;
 		OFF.bHasFormationTarget = true;
+		OFF.MoveSpeed           = MarchSpeed;   // start in Marsz; SetForceRun updates this
 
 		FFactionFragment& OFF_F = EM.GetFragmentDataChecked<FFactionFragment>(OfficerEntity);
 		OFF_F.TeamId  = TeamId;
@@ -277,6 +278,8 @@ void ABattleSpawnerActor::SpawnAgents()
 			NCO.bIsAlive        = true;
 			NCO.FormationPos    = NCOPos;
 			NCO.bHasFormationPos = true;
+			NCO.MoveSpeed       = MarchSpeed;     // formation pace (SetForceRun syncs this)
+			NCO.ChaseSpeed      = CatchUpSpeed;   // when chasing stragglers/routing
 
 			FFactionFragment& NFF = EM.GetFragmentDataChecked<FFactionFragment>(NCOEntity);
 			NFF.TeamId  = TeamId;
@@ -655,11 +658,28 @@ void ABattleSpawnerActor::SetForceRun(bool bRun)
 
 	// Bieg = bForceRun=true (RunSpeed); Marsz = bForceRun=false (MarchSpeed)
 	// Catch-up logic still kicks in automatically when soldier is far from slot.
+	const float FormationPace = bRun ? RunSpeed : MarchSpeed;
+
 	for (const FMassEntityHandle& Entity : SpawnedEntities)
 	{
 		if (!EM.IsEntityValid(Entity)) continue;
 		FAgentVelocityFragment& VF = EM.GetFragmentDataChecked<FAgentVelocityFragment>(Entity);
 		VF.bForceRun = bRun;
+	}
+
+	// Sync officer to formation pace — he leads the line, not sprints ahead.
+	if (OfficerEntity.IsValid() && EM.IsEntityValid(OfficerEntity))
+	{
+		FOfficerFragment& OFF = EM.GetFragmentDataChecked<FOfficerFragment>(OfficerEntity);
+		OFF.MoveSpeed = FormationPace;
+	}
+
+	// Sync NCOs to formation pace (their ChaseSpeed stays separate for stragglers).
+	for (const FMassEntityHandle& NCOHandle : NCOEntities)
+	{
+		if (!EM.IsEntityValid(NCOHandle)) continue;
+		FNCOFragment& NCO = EM.GetFragmentDataChecked<FNCOFragment>(NCOHandle);
+		NCO.MoveSpeed = FormationPace;
 	}
 }
 
@@ -1067,10 +1087,12 @@ void ABattleSpawnerActor::SetupVisualization()
 	UStaticMesh* OffMesh   = OfficerMesh   ? OfficerMesh.Get()   : SolMesh;
 	UStaticMesh* NcoMesh   = NCOMesh       ? NCOMesh.Get()       : SolMesh;
 
+	UMaterialInterface* NcoMat = NCOMaterial ? NCOMaterial.Get() : SoldierMaterial.Get();
+
 	SoldierHISM     = CreateHISM(TEXT("SoldierHISM"),     SolMesh, SoldierMaterial);
 	DeadSoldierHISM = CreateHISM(TEXT("DeadSoldierHISM"), SolMesh, DeadSoldierMaterial);
 	OfficerHISM     = CreateHISM(TEXT("OfficerHISM"),     OffMesh, SoldierMaterial);
-	NCOHISM         = CreateHISM(TEXT("NCOHISM"),         NcoMesh, SoldierMaterial);
+	NCOHISM         = CreateHISM(TEXT("NCOHISM"),         NcoMesh, NcoMat);
 }
 
 void ABattleSpawnerActor::UpdateVisualization()
@@ -1161,10 +1183,17 @@ void ABattleSpawnerActor::UpdateVisualization()
 
 			if (NCO.bIsAlive)
 			{
+				// NCO: slightly taller and wider than officer (~210 cm tall).
+				// Z offset must match half-height (scale.Z * 100 / 2) so the
+				// capsule stands ON the ground, not buried under it.
+				constexpr float NCOScaleXY = 0.45f;
+				constexpr float NCOScaleZ  = 2.1f;
+				constexpr float NCOZOff    = 105.f;   // half of 210
+
 				FVector Pos = TF.GetTransform().GetLocation();
-				Pos.Z += 90.f;
+				Pos.Z += NCOZOff;
 				FTransform NT(TF.GetTransform().GetRotation(), Pos,
-					FVector(0.35f, 0.35f, 1.8f));
+					FVector(NCOScaleXY, NCOScaleXY, NCOScaleZ));
 				NCOHISM->AddInstance(NT, true);
 			}
 		}

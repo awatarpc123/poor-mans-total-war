@@ -151,7 +151,7 @@ struct BIEDA_TOTAL_WAR_API FOfficerFragment : public FMassFragment
 
 	float MoraleRadius   = 500.f;   // aura radius (cm) — morale bonus to nearby soldiers
 	float MoraleBonus    = 1.f;     // morale/s granted to soldiers within MoraleRadius
-	float MoveSpeed      = 280.f;   // cm/s when chasing routing soldiers / following formation
+	float MoveSpeed      = 200.f;   // cm/s — keeps the formation pace (synced by spawner)
 	float MoraleDrainCap = 10.f;    // max morale/s drained from nearby routing soldiers
 
 	bool  bIsAlive  = true;
@@ -169,8 +169,9 @@ struct BIEDA_TOTAL_WAR_API FNCOFragment : public FMassFragment
 {
 	GENERATED_BODY()
 
-	bool  bIsAlive   = true;
-	float MoveSpeed  = 350.f;    // cm/s — faster than soldiers (280), needs to catch up
+	bool  bIsAlive    = true;
+	float MoveSpeed   = 200.f;   // cm/s — formation pace when returning to FormationPos
+	float ChaseSpeed  = 600.f;   // cm/s — when chasing a straggler or routing soldier
 
 	// Current assignment — soldier being chased
 	FMassEntityHandle TargetSoldier;

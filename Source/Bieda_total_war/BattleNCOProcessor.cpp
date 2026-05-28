@@ -208,9 +208,13 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 
 				if (DistSq > FMath::Square(80.f))
 				{
+					// ChaseSpeed when actively chasing someone (straggler/routing),
+					// MoveSpeed (formation pace) when returning to FormationPos.
+					const float Speed = NCO.bHasTarget ? NCO.ChaseSpeed : NCO.MoveSpeed;
+
 					const FVector Dir = ToTarget.GetSafeNormal2D();
 					FTransform T = Transforms[i].GetTransform();
-					T.SetLocation(NCOPos + Dir * NCO.MoveSpeed * DT);
+					T.SetLocation(NCOPos + Dir * Speed * DT);
 					T.SetRotation(FRotationMatrix::MakeFromX(Dir).ToQuat());
 					Transforms[i].GetMutableTransform() = T;
 				}

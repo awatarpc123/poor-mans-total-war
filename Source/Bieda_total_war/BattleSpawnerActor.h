@@ -122,6 +122,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
 	TObjectPtr<UStaticMesh> NCOMesh = nullptr;
 
+	/** Material for NCOs (e.g. brighter color to stand out). If nullptr, uses SoldierMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UMaterialInterface> NCOMaterial = nullptr;
+
 	/**
 	 * Issue a move order with optional formation change.
 	 * Clears any active engagement.
