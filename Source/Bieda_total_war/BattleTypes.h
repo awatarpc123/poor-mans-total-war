@@ -84,10 +84,15 @@ struct BIEDA_TOTAL_WAR_API FAgentVelocityFragment : public FMassFragment
 	// ── Per-soldier "personality" — randomized once at spawn, sticks for life ──
 	// These break the uniform-robot look without making the line look like chaos.
 	float PersonalSlotTolerance    = 100.f;  // cm — how close to slot before he "stops"
-	float PersonalSnapTime         =   2.f;  // sec — drift time toward exact slot after stopping
+	float PersonalSnapTime         =   2.f;  // sec — drift time toward final resting pos
 	float PersonalDriftAmp         =   5.f;  // cm — amplitude of lateral wavering while marching
 	float PersonalWaverAmp         =   0.04f;// fraction — speed wavering ±N%
 	float PersonalSeparationRadius = 150.f;  // cm — personal space (separation query radius)
+
+	// 2D offset added to TargetPosition when soldier comes to rest. Makes each
+	// soldier consistently stop at the same offset from their slot — no amount
+	// of re-orders will collapse the line into a perfect grid.
+	FVector PersonalFinalOffset    = FVector::ZeroVector;
 
 	// ── Formation slot info (set by spawner) ────────────────────────────────
 	int32 FormationRow  = 0;       // row index (0 = front)

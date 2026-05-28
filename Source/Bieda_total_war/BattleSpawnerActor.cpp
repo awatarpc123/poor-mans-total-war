@@ -176,6 +176,7 @@ void ABattleSpawnerActor::SpawnAgents()
 		VF.FormationCol  = Col;
 
 		// Per-soldier personality — disciplined for line infantry, sloppy for militia
+		float FinalOffsetMax;   // cm — max magnitude of the per-soldier resting offset
 		if (UnitType == EUnitType::LineInfantry)
 		{
 			VF.PersonalSlotTolerance    = FMath::FRandRange(15.f,  80.f);
@@ -183,6 +184,7 @@ void ABattleSpawnerActor::SpawnAgents()
 			VF.PersonalDriftAmp         = FMath::FRandRange( 0.5f,  3.f);
 			VF.PersonalWaverAmp         = FMath::FRandRange( 0.005f, 0.03f);
 			VF.PersonalSeparationRadius = FMath::FRandRange(80.f, 120.f);
+			FinalOffsetMax              = 25.f;
 		}
 		else  // Militia
 		{
@@ -191,7 +193,18 @@ void ABattleSpawnerActor::SpawnAgents()
 			VF.PersonalDriftAmp         = FMath::FRandRange(10.f,  30.f);
 			VF.PersonalWaverAmp         = FMath::FRandRange( 0.06f, 0.15f);
 			VF.PersonalSeparationRadius = FMath::FRandRange(120.f, 180.f);
+			FinalOffsetMax              = 60.f;
 		}
+
+		// Random 2D offset (uniform within a disc) — soldier's permanent quirk:
+		// the spot he ALWAYS ends up at relative to his slot, regardless of how
+		// many move orders are issued.
+		const float OffsetAngle = FMath::FRandRange(0.f, 2.f * UE_PI);
+		const float OffsetMag   = FMath::FRandRange(0.f, FinalOffsetMax);
+		VF.PersonalFinalOffset  = FVector(
+			OffsetMag * FMath::Cos(OffsetAngle),
+			OffsetMag * FMath::Sin(OffsetAngle),
+			0.f);
 
 		// Organic curve: sin-based arc + per-entity wobble
 		{

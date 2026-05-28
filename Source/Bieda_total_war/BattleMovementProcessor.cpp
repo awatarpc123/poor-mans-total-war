@@ -234,15 +234,19 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			}
 			else
 			{
-				// ── Within personal tolerance: snap-to-slot soft drift ────
-				// Soldier slowly drifts toward exact slot position over PersonalSnapTime,
-				// so the line tightens up after the formation halts instead of leaving
-				// each man stopped wherever he happened to cross his tolerance.
+				// ── Within personal tolerance: snap-to-FINAL-OFFSET soft drift ──
+				// Drift toward TargetPosition + PersonalFinalOffset — soldier's
+				// permanent quirk position. The line tightens up but never to a
+				// perfect grid: each man stops at HIS spot, not at THE spot.
+				const FVector FinalPos    = Orders[i].TargetPosition + Velocities[i].PersonalFinalOffset;
+				const FVector ToFinal     = FinalPos - CurrentPos;
+				const float   DistToFinal = ToFinal.Size2D();
+
 				FVector DesiredVel = Separation + FidgetOffset * 2.f;
-				if (DistToSlot > 5.f && Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
+				if (DistToFinal > 5.f && Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
 				{
-					const FVector SnapVel = ToTarget.GetSafeNormal2D()
-						* (DistToSlot / Velocities[i].PersonalSnapTime);
+					const FVector SnapVel = ToFinal.GetSafeNormal2D()
+						* (DistToFinal / Velocities[i].PersonalSnapTime);
 					DesiredVel += SnapVel;
 				}
 
