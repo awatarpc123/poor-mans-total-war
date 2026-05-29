@@ -13,6 +13,14 @@ namespace
 		uint8   SquadId;
 	};
 
+	struct FDrummerSnap
+	{
+		FVector Position;
+		bool    bIsAlive;
+		uint8   SquadId;
+		float   DrumRadius;
+	};
+
 	struct FSoldierSnap
 	{
 		bool  bExecuted;
@@ -40,6 +48,12 @@ void UBattleOrderProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 	OfficerQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
 	OfficerQuery.RegisterWithProcessor(*this);
 
+	DrummerQuery.Initialize(EntityManager);
+	DrummerQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerQuery.AddRequirement<FDrummerFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerQuery.RegisterWithProcessor(*this);
+
 	SoldierQuery.Initialize(EntityManager);
 	SoldierQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
 	SoldierQuery.AddRequirement<FAgentStateFragment>(EMassFragmentAccess::ReadWrite);
@@ -64,6 +78,20 @@ void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 		const auto Factions    = Ctx.GetFragmentView<FFactionFragment>();
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i)
 			Officers.Add({ Transforms[i].GetTransform().GetLocation(), OfficerData[i].bIsAlive, Factions[i].SquadId });
+	});
+
+	// -----------------------------------------------------------------------
+	// Pass 0b: snapshot drummers (order relay nodes)
+	// -----------------------------------------------------------------------
+	TArray<FDrummerSnap> Drummers;
+	DrummerQuery.ForEachEntityChunk(Context, [&Drummers](FMassExecutionContext& Ctx)
+	{
+		const auto Transforms  = Ctx.GetFragmentView<FTransformFragment>();
+		const auto DrummerData = Ctx.GetFragmentView<FDrummerFragment>();
+		const auto Factions    = Ctx.GetFragmentView<FFactionFragment>();
+		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i)
+			Drummers.Add({ Transforms[i].GetTransform().GetLocation(),
+				DrummerData[i].bIsAlive, Factions[i].SquadId, DrummerData[i].DrumRadius });
 	});
 
 	// -----------------------------------------------------------------------
@@ -179,6 +207,25 @@ void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 					Prop.ExecutionDelay = FMath::RandRange(0.f, 0.3f);
 					bGotOrder = true;
 					break;
+				}
+			}
+
+			// ── Drummer relay (own squad only) ───────────────────────────
+			// A living drummer extends the officer's reach: soldiers inside the
+			// drumbeat radius hear the order with a small relay delay.
+			if (!bGotOrder)
+			{
+				for (const FDrummerSnap& Drm : Drummers)
+				{
+					if (!Drm.bIsAlive) continue;
+					if (Drm.SquadId != MySquad) continue;
+					if ((Drm.Position - MyPos).SizeSquared2D() < FMath::Square(Drm.DrumRadius))
+					{
+						Prop.bOrderReceived = true;
+						Prop.ExecutionDelay = FMath::RandRange(0.1f, 0.4f);
+						bGotOrder = true;
+						break;
+					}
 				}
 			}
 

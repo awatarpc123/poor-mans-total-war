@@ -9,6 +9,9 @@
 /**
  * Propagates advance orders through the formation as a wave:
  *   Officer → nearby soldiers (immediate) → their neighbours (+0.3–0.8s per hop)
+ * Drummers (doboszowie) act as relay nodes — soldiers within a living drummer's
+ * DrumRadius hear the order directly, extending the officer's effective voice
+ * range across a wide line.
  * Low-morale soldiers have a chance to ignore the order entirely (transmission noise).
  */
 UCLASS()
@@ -25,6 +28,7 @@ protected:
 
 private:
 	FMassEntityQuery OfficerQuery;   // FTransform + FOfficer
+	FMassEntityQuery DrummerQuery;   // FTransform + FDrummer  (order relay nodes)
 	FMassEntityQuery SoldierQuery;   // FTransform + FAgentState + FMorale + FOrderPropagation
 
 	// Officer voice range — soldiers inside hear the order directly
