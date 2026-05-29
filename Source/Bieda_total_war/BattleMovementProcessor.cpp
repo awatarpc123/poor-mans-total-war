@@ -155,12 +155,26 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 				// keep nudging him toward TargetPosition + PersonalFinalOffset so
 				// he settles into HIS spot, not THE spot. Without this, formation
 				// collapses into a grid after a few orders.
+				//
+				// CRITICAL — the DistToFinal < SettleRange gate:
+				//   This snap is ONLY for short-range settling. A soldier is ALSO
+				//   HOLDING with bHasTarget during the order-propagation window of a
+				//   FRESH move order (before BattleOrderProcessor flips him to
+				//   ADVANCING). In that window the target is far away (thousands of
+				//   cm), so an ungated SnapVel = DistToFinal / SnapTime would be
+				//   ~2500 cm/s — soldiers would "black-hole sprint" toward the goal
+				//   instead of marching. The state processor only flips
+				//   ADVANCING→HOLDING within 150 cm of the slot, so genuine settling
+				//   is always < ~210 cm (150 + max PersonalFinalOffset). Anything
+				//   farther is a pending march and must be left to the ADVANCING code.
+				constexpr float SettleRange = 250.f;   // cm
 				if (State == EAgentState::HOLDING && Orders[i].bHasTarget)
 				{
 					const FVector FinalPos    = Orders[i].TargetPosition + Velocities[i].PersonalFinalOffset;
 					const FVector ToFinal     = FinalPos - CurrentPos;
 					const float   DistToFinal = ToFinal.Size2D();
-					if (DistToFinal > 5.f && Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
+					if (DistToFinal > 5.f && DistToFinal < SettleRange
+						&& Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
 					{
 						const FVector SnapVel = ToFinal.GetSafeNormal2D()
 							* (DistToFinal / Velocities[i].PersonalSnapTime);
