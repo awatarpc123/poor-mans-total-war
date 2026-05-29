@@ -5,7 +5,7 @@
 
 namespace
 {
-	struct FSoldierSnap
+	struct FOfficerSoldierSnap
 	{
 		FVector     Position;
 		EAgentState State;
@@ -43,7 +43,7 @@ void UBattleOfficerProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 	// -----------------------------------------------------------------------
 	// Pass 1: snapshot all soldiers (position + state + squad)
 	// -----------------------------------------------------------------------
-	TArray<FSoldierSnap> Soldiers;
+	TArray<FOfficerSoldierSnap> Soldiers;
 
 	SoldierQuery.ForEachEntityChunk(Context, [&Soldiers](FMassExecutionContext& Ctx)
 	{
@@ -87,7 +87,7 @@ void UBattleOfficerProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			float   NearestRoutingDist = FLT_MAX;
 			float   RoutingDrain       = 0.f;
 
-			for (const FSoldierSnap& S : Soldiers)
+			for (const FOfficerSoldierSnap& S : Soldiers)
 			{
 				if (S.SquadId != MySquad) continue;   // own squad only
 				if (S.State == EAgentState::DEAD) continue;

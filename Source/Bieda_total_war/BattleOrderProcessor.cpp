@@ -6,7 +6,7 @@
 
 namespace
 {
-	struct FOfficerSnap
+	struct FOrderOfficerSnap
 	{
 		FVector Position;
 		bool    bIsAlive;
@@ -21,7 +21,7 @@ namespace
 		float   DrumRadius;
 	};
 
-	struct FSoldierSnap
+	struct FOrderSoldierSnap
 	{
 		bool  bExecuted;
 		bool  bRouting;
@@ -70,7 +70,7 @@ void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 	// -----------------------------------------------------------------------
 	// Pass 0: snapshot officers
 	// -----------------------------------------------------------------------
-	TArray<FOfficerSnap> Officers;
+	TArray<FOrderOfficerSnap> Officers;
 	OfficerQuery.ForEachEntityChunk(Context, [&Officers](FMassExecutionContext& Ctx)
 	{
 		const auto Transforms  = Ctx.GetFragmentView<FTransformFragment>();
@@ -97,7 +97,7 @@ void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 	// -----------------------------------------------------------------------
 	// Pass 1: snapshot all soldiers + positions for spatial grid
 	// -----------------------------------------------------------------------
-	TArray<FSoldierSnap> AllSoldiers;
+	TArray<FOrderSoldierSnap> AllSoldiers;
 	TArray<FVector>      Positions;
 
 	SoldierQuery.ForEachEntityChunk(Context, [&AllSoldiers, &Positions](FMassExecutionContext& Ctx)
@@ -197,7 +197,7 @@ void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 
 			// ── Officer voice (own squad only) ───────────────────────────
 			bool bGotOrder = false;
-			for (const FOfficerSnap& Off : Officers)
+			for (const FOrderOfficerSnap& Off : Officers)
 			{
 				if (!Off.bIsAlive) continue;
 				if (Off.SquadId != MySquad) continue;

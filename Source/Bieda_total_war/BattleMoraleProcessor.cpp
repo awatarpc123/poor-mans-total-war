@@ -14,7 +14,7 @@ namespace
 		uint8       TeamId;
 	};
 
-	struct FOfficerSnap
+	struct FMoraleOfficerSnap
 	{
 		FVector Position;
 		float   MoraleRadius;
@@ -73,7 +73,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	// -----------------------------------------------------------------------
 	// Pass 0b: officer snapshots (SquadId for binding to specific soldiers)
 	// -----------------------------------------------------------------------
-	TArray<FOfficerSnap> Officers;
+	TArray<FMoraleOfficerSnap> Officers;
 
 	OfficerQuery.ForEachEntityChunk(Context, [&Officers](FMassExecutionContext& Ctx)
 	{
@@ -194,7 +194,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			Morale += StableBonus * DT;
 
 			// ── Officer effects — by SquadId (own officer only) ───────────
-			for (const FOfficerSnap& Off : Officers)
+			for (const FMoraleOfficerSnap& Off : Officers)
 			{
 				if (Off.SquadId != MySquad) continue;
 

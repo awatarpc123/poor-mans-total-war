@@ -5,7 +5,7 @@
 
 namespace
 {
-	struct FSoldierSnap
+	struct FNCOSoldierSnap
 	{
 		FVector           Position;
 		EAgentState       State;
@@ -51,7 +51,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 	// -------------------------------------------------------------------
 	// Pass 0: snapshot all soldiers
 	// -------------------------------------------------------------------
-	TArray<FSoldierSnap> Soldiers;
+	TArray<FNCOSoldierSnap> Soldiers;
 
 	SoldierSnapshotQuery.ForEachEntityChunk(Context,
 		[&Soldiers](FMassExecutionContext& Ctx)
@@ -100,7 +100,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 			if (NCO.bHasTarget)
 			{
 				bool bStillValid = false;
-				for (const FSoldierSnap& S : Soldiers)
+				for (const FNCOSoldierSnap& S : Soldiers)
 				{
 					if (S.Handle != NCO.TargetSoldier) continue;
 					if (S.SquadId != MySquad) break;
@@ -136,7 +136,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				// Priority 1: routing soldiers (rally)
 				for (int32 s = 0; s < Soldiers.Num(); ++s)
 				{
-					const FSoldierSnap& S = Soldiers[s];
+					const FNCOSoldierSnap& S = Soldiers[s];
 					if (S.SquadId != MySquad) continue;
 					if (S.State != EAgentState::ROUTING) continue;
 
@@ -153,7 +153,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				{
 					for (int32 s = 0; s < Soldiers.Num(); ++s)
 					{
-						const FSoldierSnap& S = Soldiers[s];
+						const FNCOSoldierSnap& S = Soldiers[s];
 						if (S.SquadId != MySquad) continue;
 						if (S.State == EAgentState::DEAD) continue;
 						if (S.bOrderExecuted) continue;
@@ -183,7 +183,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 			if (NCO.bHasTarget)
 			{
 				// Move toward target soldier
-				for (const FSoldierSnap& S : Soldiers)
+				for (const FNCOSoldierSnap& S : Soldiers)
 				{
 					if (S.Handle == NCO.TargetSoldier)
 					{
@@ -226,7 +226,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				FVector TargetPos = NCOPos;
 				EAgentState TargetState = EAgentState::DEAD;
 
-				for (const FSoldierSnap& S : Soldiers)
+				for (const FNCOSoldierSnap& S : Soldiers)
 				{
 					if (S.Handle == NCO.TargetSoldier)
 					{
@@ -275,7 +275,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 			// ── Rally aura: boost morale of ALL nearby routing squadmates ─
 			if (!NCO.bHasTarget || true)  // always apply aura
 			{
-				for (const FSoldierSnap& S : Soldiers)
+				for (const FNCOSoldierSnap& S : Soldiers)
 				{
 					if (S.SquadId != MySquad) continue;
 					if (S.State != EAgentState::ROUTING) continue;
