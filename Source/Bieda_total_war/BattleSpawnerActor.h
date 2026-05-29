@@ -42,6 +42,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "0", ClampMax = "200"))
 	float FormationCurveStrength = 40.f;
 
+	/** Line Infantry only: when formation is auto (RowSize = 0), form a 2-rank-deep
+	 *  line — the British "thin red line". Ignored when RowSize is set explicitly
+	 *  or when drag-to-form overrides the row count. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	bool bTwoRankLine = true;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
 	int32 NumAgents = 50;
 
@@ -51,6 +57,12 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
 	float SpawnSpacing = 120.f;
+
+	/** Number of corporals among the rank-and-file. Purely visual — they fight as
+	 *  privates, but are marked with CorporalMaterial so the company reads as
+	 *  organized. British establishment: ~5 per company. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn", meta = (ClampMin = "0", ClampMax = "20"))
+	int32 NumCorporals = 5;
 
 	/** Initial facing of all soldiers. Set Yaw = 180 for enemy formations facing the player. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
@@ -68,9 +80,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Officer")
 	float OfficerInitialMorale = 95.f;
 
-	/** Number of NCOs (podoficerów) per squad. They chase stragglers and help rally. */
+	/** Number of NCOs (sierżantów) per company. They stand behind the line as file
+	 *  closers, dress the ranks, chase stragglers and rally routers. British
+	 *  establishment: 4–5 per company. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|NCO", meta = (ClampMin = "0", ClampMax = "6"))
-	int32 NumNCOs = 2;
+	int32 NumNCOs = 4;
+
+	/** Number of drummers (doboszów) per company. They march with the line and
+	 *  relay the officer's orders by drumbeat (extend order-propagation range).
+	 *  British establishment: 2 per company. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Drummer", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 NumDrummers = 2;
+
+	/** Drumbeat "voice" radius (cm) — soldiers of the same squad within this range
+	 *  of a living drummer hear move orders directly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Drummer", meta = (ClampMin = "100", ClampMax = "2000"))
+	float DrumVoiceRadius = 600.f;
 
 	// ── Combat stats (per-spawner override) ─────────────────────────────────
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
@@ -126,6 +151,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
 	TObjectPtr<UMaterialInterface> NCOMaterial = nullptr;
 
+	/** Mesh for drummers. If nullptr, uses SoldierMesh or cylinder. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UStaticMesh> DrummerMesh = nullptr;
+
+	/** Material for drummers (e.g. distinct color). If nullptr, uses SoldierMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UMaterialInterface> DrummerMaterial = nullptr;
+
+	/** Material for corporals (subtle marker color). If nullptr, uses SoldierMaterial. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	TObjectPtr<UMaterialInterface> CorporalMaterial = nullptr;
+
 	/**
 	 * Issue a move order with optional formation change.
 	 * Clears any active engagement.
@@ -179,7 +216,9 @@ protected:
 private:
 	TArray<FMassEntityHandle> SpawnedEntities;   // soldiers only
 	FMassEntityHandle OfficerEntity;              // officer (invalid if not spawned)
-	TArray<FMassEntityHandle> NCOEntities;        // NCOs
+	TArray<FMassEntityHandle> NCOEntities;        // NCOs (sierżanci)
+	TArray<FMassEntityHandle> DrummerEntities;    // drummers (doboszowie)
+	TArray<bool> CorporalFlags;                   // parallel to SpawnedEntities — visual corporal marker
 	uint8 MySquadId = 0;
 	int32 CurrentRowSize = -1;   // set at spawn, updated by drag-to-form
 	void SpawnAgents();
@@ -214,6 +253,12 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> NCOHISM;
+
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DrummerHISM;
+
+	UPROPERTY()
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CorporalHISM;
 
 	void SetupVisualization();
 	void UpdateVisualization();

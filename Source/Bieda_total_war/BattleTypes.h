@@ -199,6 +199,26 @@ struct BIEDA_TOTAL_WAR_API FNCOFragment : public FMassFragment
 	float RallyRadius      = 300.f;  // cm
 };
 
+// ── Drummer (Dobosz) ─────────────────────────────────────────────────────────
+
+USTRUCT()
+struct BIEDA_TOTAL_WAR_API FDrummerFragment : public FMassFragment
+{
+	GENERATED_BODY()
+
+	bool  bIsAlive  = true;
+	float MoveSpeed = 200.f;   // cm/s — formation pace (synced by spawner via SetForceRun)
+
+	/** Drumbeat "voice" radius (cm). Soldiers of the same squad within this range
+	 *  hear move orders directly — the drummer relays the officer's command.
+	 *  Consumed by BattleOrderProcessor. */
+	float DrumRadius = 600.f;
+
+	// Home position in formation (set by spawner on move order)
+	FVector FormationPos     = FVector::ZeroVector;
+	bool    bHasFormationPos = false;
+};
+
 // ── Faction ─────────────────────────────────────────────────────────────────
 
 USTRUCT()

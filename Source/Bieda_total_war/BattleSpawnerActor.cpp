@@ -133,21 +133,48 @@ void ABattleSpawnerActor::SpawnAgents()
 
 	const FVector Base = GetActorLocation();
 
-	// RowSize: 0 = auto (square grid), otherwise use value from editor
-	const int32 EffectiveRowSize = (RowSize > 0)
-		? FMath::Clamp(RowSize, 1, NumAgents)
-		: FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
+	// RowSize: 0 = auto, otherwise use value from editor.
+	//   Line Infantry + bTwoRankLine → 2-rank-deep line (British "thin red line").
+	//   Otherwise → square-ish grid.
+	int32 EffectiveRowSize;
+	if (RowSize > 0)
+	{
+		EffectiveRowSize = FMath::Clamp(RowSize, 1, NumAgents);
+	}
+	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
+	{
+		EffectiveRowSize = FMath::Max(1, FMath::CeilToInt(NumAgents / 2.f));
+	}
+	else
+	{
+		EffectiveRowSize = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
+	}
 	CurrentRowSize = EffectiveRowSize;   // store for future quick-move orders
-	const float HalfGrid = EffectiveRowSize * SpawnSpacing * 0.5f;
+
+	const int32 NumSpawnRows = FMath::Max(1, FMath::CeilToInt((float)NumAgents / EffectiveRowSize));
+	const float HalfFront = EffectiveRowSize * SpawnSpacing * 0.5f;   // half formation width
+	const float HalfDepth = NumSpawnRows    * SpawnSpacing * 0.5f;    // half formation depth
 
 	SpawnedEntities.Reserve(NumAgents);
+
+	// Mark which rank-and-file are corporals — spread evenly, visual only.
+	CorporalFlags.Init(false, NumAgents);
+	{
+		const int32 NumCorp = FMath::Clamp(NumCorporals, 0, NumAgents);
+		for (int32 c = 0; c < NumCorp; ++c)
+		{
+			const int32 Idx = FMath::Clamp(
+				FMath::RoundToInt((c + 0.5f) * NumAgents / NumCorp), 0, NumAgents - 1);
+			CorporalFlags[Idx] = true;
+		}
+	}
 
 	for (int32 i = 0; i < NumAgents; ++i)
 	{
 		const int32 Row = i / EffectiveRowSize;
 		const int32 Col = i % EffectiveRowSize;
 		const FVector SpawnPos = Base
-			+ FVector(Col * SpawnSpacing - HalfGrid, Row * SpawnSpacing - HalfGrid, 0.f);
+			+ FVector(Col * SpawnSpacing - HalfFront, Row * SpawnSpacing - HalfDepth, 0.f);
 
 		FMassEntityHandle Entity = EM.CreateEntity(Archetype);
 
@@ -256,9 +283,9 @@ void ABattleSpawnerActor::SpawnAgents()
 		FMassArchetypeHandle OfficerArchetype = EM.CreateArchetype(OfficerFrags);
 		OfficerEntity = EM.CreateEntity(OfficerArchetype);
 
-		// Officer stands at the FRONT of the formation (first row center)
+		// Officer stands at the FRONT of the formation (centered, just ahead of the line)
 		const FVector OfficerPos = Base + SpawnFacing.Quaternion().RotateVector(
-			FVector(0.f, EffectiveRowSize * SpawnSpacing * 0.5f + 100.f, 0.f));
+			FVector(0.f, HalfDepth + 100.f, 0.f));
 
 		FTransformFragment& OTF = EM.GetFragmentDataChecked<FTransformFragment>(OfficerEntity);
 		OTF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), OfficerPos, FVector::OneVector);
@@ -294,9 +321,11 @@ void ABattleSpawnerActor::SpawnAgents()
 		{
 			FMassEntityHandle NCOEntity = EM.CreateEntity(NCOArchetype);
 
-			// Spread NCOs behind the last row
-			const float LateralOffset = (n - (NumNCOs - 1) * 0.5f) * SpawnSpacing * 2.f;
-			const FVector NCOLocalPos(LateralOffset, -(EffectiveRowSize * SpawnSpacing * 0.5f + 200.f), 0.f);
+			// File closers: spread across 80% of the front width, just behind the line
+			const float LateralOffset = (NumNCOs > 1)
+				? (static_cast<float>(n) / (NumNCOs - 1) - 0.5f) * (HalfFront * 2.f) * 0.8f
+				: 0.f;
+			const FVector NCOLocalPos(LateralOffset, -(HalfDepth + SpawnSpacing * 0.75f), 0.f);
 			const FVector NCOPos = Base + SpawnFacing.Quaternion().RotateVector(NCOLocalPos);
 
 			FTransformFragment& NTF = EM.GetFragmentDataChecked<FTransformFragment>(NCOEntity);
@@ -320,8 +349,52 @@ void ABattleSpawnerActor::SpawnAgents()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("BattleSpawner: %d soldiers + officer=%d + NCOs=%d  squad=%d team=%d rowSize=%d"),
-		SpawnedEntities.Num(), bSpawnOfficer ? 1 : 0, NCOEntities.Num(),
+	// ── Drummers (doboszowie — march with the line, relay orders by drumbeat) ──
+	if (NumDrummers > 0)
+	{
+		TArray<const UScriptStruct*> DrummerFrags = {
+			FTransformFragment::StaticStruct(),
+			FMoraleFragment::StaticStruct(),
+			FDrummerFragment::StaticStruct(),
+			FFactionFragment::StaticStruct()
+		};
+		FMassArchetypeHandle DrummerArchetype = EM.CreateArchetype(DrummerFrags);
+		DrummerEntities.Reserve(NumDrummers);
+
+		for (int32 d = 0; d < NumDrummers; ++d)
+		{
+			FMassEntityHandle DrummerEntity = EM.CreateEntity(DrummerArchetype);
+
+			// Spread drummers across the rear, between the line and the NCOs
+			const float LateralOffset = (NumDrummers > 1)
+				? (static_cast<float>(d) / (NumDrummers - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
+				: 0.f;
+			const FVector DrummerLocalPos(LateralOffset, -(HalfDepth + SpawnSpacing * 0.4f), 0.f);
+			const FVector DrummerPos = Base + SpawnFacing.Quaternion().RotateVector(DrummerLocalPos);
+
+			FTransformFragment& DTF = EM.GetFragmentDataChecked<FTransformFragment>(DrummerEntity);
+			DTF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), DrummerPos, FVector::OneVector);
+
+			FMoraleFragment& DMF = EM.GetFragmentDataChecked<FMoraleFragment>(DrummerEntity);
+			DMF.Morale = OfficerInitialMorale;   // drummers steady, near the colors
+
+			FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntity);
+			DR.bIsAlive         = true;
+			DR.MoveSpeed        = MarchSpeed;     // formation pace (SetForceRun syncs this)
+			DR.DrumRadius       = DrumVoiceRadius;
+			DR.FormationPos     = DrummerPos;
+			DR.bHasFormationPos = true;
+
+			FFactionFragment& DFF = EM.GetFragmentDataChecked<FFactionFragment>(DrummerEntity);
+			DFF.TeamId  = TeamId;
+			DFF.SquadId = MySquadId;
+
+			DrummerEntities.Add(DrummerEntity);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("BattleSpawner: %d soldiers + officer=%d + NCOs=%d + drummers=%d  squad=%d team=%d rowSize=%d"),
+		SpawnedEntities.Num(), bSpawnOfficer ? 1 : 0, NCOEntities.Num(), DrummerEntities.Num(),
 		MySquadId, TeamId, CurrentRowSize);
 }
 
@@ -350,6 +423,11 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 	else if (CurrentRowSize > 0)
 	{
 		LocalRowSize = CurrentRowSize;
+	}
+	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
+	{
+		LocalRowSize = FMath::Max(3, FMath::CeilToInt(NumAgents / 2.f));
+		CurrentRowSize = LocalRowSize;
 	}
 	else
 	{
@@ -450,16 +528,31 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		OFF.bHasFormationTarget = true;
 	}
 
-	// ── Update NCO formation positions (behind last row) ──────────────────────
+	// ── Update NCO formation positions (file closers behind the line) ─────────
 	for (int32 n = 0; n < NCOEntities.Num(); ++n)
 	{
 		if (!EM.IsEntityValid(NCOEntities[n])) continue;
 		FNCOFragment& NCO = EM.GetFragmentDataChecked<FNCOFragment>(NCOEntities[n]);
-		const float LateralOffset = (n - (NCOEntities.Num() - 1) * 0.5f) * SpawnSpacing * 2.f;
-		const FVector RearLocal(LateralOffset, -(HalfDepth + 200.f), 0.f);
+		const float LateralOffset = (NCOEntities.Num() > 1)
+			? (static_cast<float>(n) / (NCOEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.8f
+			: 0.f;
+		const FVector RearLocal(LateralOffset, -(HalfDepth + SpawnSpacing * 0.75f), 0.f);
 		NCO.FormationPos     = NewWorldTarget + FormRot.RotateVector(RearLocal);
 		NCO.bHasFormationPos = true;
 		NCO.bHasTarget       = false;   // clear stale target on new order
+	}
+
+	// ── Update drummer formation positions (between line and NCOs) ────────────
+	for (int32 d = 0; d < DrummerEntities.Num(); ++d)
+	{
+		if (!EM.IsEntityValid(DrummerEntities[d])) continue;
+		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntities[d]);
+		const float LateralOffset = (DrummerEntities.Num() > 1)
+			? (static_cast<float>(d) / (DrummerEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
+			: 0.f;
+		const FVector RearLocal(LateralOffset, -(HalfDepth + SpawnSpacing * 0.4f), 0.f);
+		DR.FormationPos     = NewWorldTarget + FormRot.RotateVector(RearLocal);
+		DR.bHasFormationPos = true;
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("BattleSpawner squad=%d: marsz → (%.0f, %.0f) rowSize=%d rows=%d"),
@@ -512,6 +605,14 @@ void ABattleSpawnerActor::HoldPosition()
 		FNCOFragment& NF = EM.GetFragmentDataChecked<FNCOFragment>(NCO);
 		NF.bHasFormationPos = false;
 		NF.bHasTarget       = false;
+	}
+
+	// ── Stop drummers ────────────────────────────────────────────────────────
+	for (const FMassEntityHandle& Drummer : DrummerEntities)
+	{
+		if (!EM.IsEntityValid(Drummer)) continue;
+		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(Drummer);
+		DR.bHasFormationPos = false;
 	}
 }
 
@@ -711,6 +812,14 @@ void ABattleSpawnerActor::SetForceRun(bool bRun)
 		if (!EM.IsEntityValid(NCOHandle)) continue;
 		FNCOFragment& NCO = EM.GetFragmentDataChecked<FNCOFragment>(NCOHandle);
 		NCO.MoveSpeed = FormationPace;
+	}
+
+	// Sync drummers to formation pace — they march with the line.
+	for (const FMassEntityHandle& DrummerHandle : DrummerEntities)
+	{
+		if (!EM.IsEntityValid(DrummerHandle)) continue;
+		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerHandle);
+		DR.MoveSpeed = FormationPace;
 	}
 }
 
@@ -1117,13 +1226,18 @@ void ABattleSpawnerActor::SetupVisualization()
 	UStaticMesh* SolMesh   = SoldierMesh   ? SoldierMesh.Get()   : Fallback;
 	UStaticMesh* OffMesh   = OfficerMesh   ? OfficerMesh.Get()   : SolMesh;
 	UStaticMesh* NcoMesh   = NCOMesh       ? NCOMesh.Get()       : SolMesh;
+	UStaticMesh* DrumMesh  = DrummerMesh   ? DrummerMesh.Get()   : SolMesh;
 
-	UMaterialInterface* NcoMat = NCOMaterial ? NCOMaterial.Get() : SoldierMaterial.Get();
+	UMaterialInterface* NcoMat  = NCOMaterial      ? NCOMaterial.Get()      : SoldierMaterial.Get();
+	UMaterialInterface* DrumMat = DrummerMaterial  ? DrummerMaterial.Get()  : SoldierMaterial.Get();
+	UMaterialInterface* CorpMat = CorporalMaterial ? CorporalMaterial.Get() : SoldierMaterial.Get();
 
 	SoldierHISM     = CreateHISM(TEXT("SoldierHISM"),     SolMesh, SoldierMaterial);
 	DeadSoldierHISM = CreateHISM(TEXT("DeadSoldierHISM"), SolMesh, DeadSoldierMaterial);
 	OfficerHISM     = CreateHISM(TEXT("OfficerHISM"),     OffMesh, SoldierMaterial);
 	NCOHISM         = CreateHISM(TEXT("NCOHISM"),         NcoMesh, NcoMat);
+	DrummerHISM     = CreateHISM(TEXT("DrummerHISM"),     DrumMesh, DrumMat);
+	CorporalHISM    = CreateHISM(TEXT("CorporalHISM"),    SolMesh, CorpMat);
 }
 
 void ABattleSpawnerActor::UpdateVisualization()
@@ -1145,11 +1259,12 @@ void ABattleSpawnerActor::UpdateVisualization()
 	constexpr float AliveScaleZ  = 1.7f;
 	constexpr float AliveZOff    = 85.f;    // half of 170
 
-	// ── Soldiers ──────────────────────────────────────────────────────────
+	// ── Soldiers (corporals routed to CorporalHISM — visual marker only) ────
 	if (SoldierHISM && DeadSoldierHISM)
 	{
 		SoldierHISM->ClearInstances();
 		DeadSoldierHISM->ClearInstances();
+		if (CorporalHISM) CorporalHISM->ClearInstances();
 
 		const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
 		for (int32 i = 0; i < SoldierCount; ++i)
@@ -1176,7 +1291,13 @@ void ABattleSpawnerActor::UpdateVisualization()
 				Pos.Z += AliveZOff;
 				FTransform AliveT(TF.GetTransform().GetRotation(), Pos,
 					FVector(AliveScaleXY, AliveScaleXY, AliveScaleZ));
-				SoldierHISM->AddInstance(AliveT, /*bWorldSpace=*/true);
+
+				const bool bCorporal = CorporalHISM
+					&& CorporalFlags.IsValidIndex(i) && CorporalFlags[i];
+				if (bCorporal)
+					CorporalHISM->AddInstance(AliveT, /*bWorldSpace=*/true);
+				else
+					SoldierHISM->AddInstance(AliveT, /*bWorldSpace=*/true);
 			}
 		}
 	}
@@ -1226,6 +1347,34 @@ void ABattleSpawnerActor::UpdateVisualization()
 				FTransform NT(TF.GetTransform().GetRotation(), Pos,
 					FVector(NCOScaleXY, NCOScaleXY, NCOScaleZ));
 				NCOHISM->AddInstance(NT, true);
+			}
+		}
+	}
+
+	// ── Drummers ──────────────────────────────────────────────────────────
+	if (DrummerHISM)
+	{
+		DrummerHISM->ClearInstances();
+
+		for (const FMassEntityHandle& DrummerHandle : DrummerEntities)
+		{
+			if (!EM.IsEntityValid(DrummerHandle)) continue;
+
+			const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(DrummerHandle);
+			const FDrummerFragment& DR   = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerHandle);
+
+			if (DR.bIsAlive)
+			{
+				// Drummer: a touch shorter than a private (~175 cm), distinct material.
+				constexpr float DrumScaleXY = 0.32f;
+				constexpr float DrumScaleZ  = 1.75f;
+				constexpr float DrumZOff    = 87.5f;   // half of 175
+
+				FVector Pos = TF.GetTransform().GetLocation();
+				Pos.Z += DrumZOff;
+				FTransform DT(TF.GetTransform().GetRotation(), Pos,
+					FVector(DrumScaleXY, DrumScaleXY, DrumScaleZ));
+				DrummerHISM->AddInstance(DT, true);
 			}
 		}
 	}
