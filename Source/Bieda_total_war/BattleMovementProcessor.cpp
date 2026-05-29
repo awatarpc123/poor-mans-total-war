@@ -148,7 +148,26 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 			// ── Stationary states: decelerate + separation + fidget ────────
 			if (State != EAgentState::ADVANCING || !Orders[i].bHasTarget)
 			{
-				const FVector DesiredVel = Separation + FidgetOffset * 2.f;
+				FVector DesiredVel = Separation + FidgetOffset * 2.f;
+
+				// Snap-to-FinalPos drift: when soldier is HOLDING after reaching
+				// his slot (state processor flipped him from ADVANCING at ~150 cm),
+				// keep nudging him toward TargetPosition + PersonalFinalOffset so
+				// he settles into HIS spot, not THE spot. Without this, formation
+				// collapses into a grid after a few orders.
+				if (State == EAgentState::HOLDING && Orders[i].bHasTarget)
+				{
+					const FVector FinalPos    = Orders[i].TargetPosition + Velocities[i].PersonalFinalOffset;
+					const FVector ToFinal     = FinalPos - CurrentPos;
+					const float   DistToFinal = ToFinal.Size2D();
+					if (DistToFinal > 5.f && Velocities[i].PersonalSnapTime > KINDA_SMALL_NUMBER)
+					{
+						const FVector SnapVel = ToFinal.GetSafeNormal2D()
+							* (DistToFinal / Velocities[i].PersonalSnapTime);
+						DesiredVel += SnapVel;
+					}
+				}
+
 				Velocities[i].Velocity = FMath::VInterpTo(
 					Velocities[i].Velocity, DesiredVel, DeltaTime, 5.f);
 
