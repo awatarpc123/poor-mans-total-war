@@ -1,0 +1,46 @@
+# Bieda TotalWar — git binary handling for Unreal Engine assets.
+#
+# WHY: with core.autocrlf=true (the default on Windows) and no rules here, git
+# can apply line-ending / text normalisation to binary UE assets and CORRUPT
+# them (.uasset/.umap deserialize errors: "Unexpected EOF", garbage offsets).
+# Marking them "binary" = "-text -diff": git never converts or tries to merge
+# them. This does NOT un-corrupt files already broken in history — it prevents
+# any FUTURE damage on add / checkout / pull.
+
+# ── Unreal Engine assets ────────────────────────────────────────────────────
+*.uasset  binary
+*.umap    binary
+*.ubulk   binary
+*.uexp    binary
+*.upk     binary
+*.udk     binary
+
+# ── Images / textures ───────────────────────────────────────────────────────
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.bmp   binary
+*.tga   binary
+*.tif   binary
+*.tiff  binary
+*.exr   binary
+*.hdr   binary
+*.psd   binary
+
+# ── Audio ───────────────────────────────────────────────────────────────────
+*.wav   binary
+*.ogg   binary
+*.mp3   binary
+*.flac  binary
+
+# ── Models / fonts / misc binaries ──────────────────────────────────────────
+*.fbx   binary
+*.3ds   binary
+*.ttf   binary
+*.otf   binary
+*.icu   binary
+*.bin   binary
+*.dll   binary
+*.lib   binary
+*.pdb   binary
