@@ -102,14 +102,45 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 					}
 				});
 
-			// ── Routing: flee chaotically ──────────────────────────────────
+			// ── Routing: flee AWAY FROM THE ENEMY ─────────────────────────
 			if (State == EAgentState::ROUTING)
 			{
-				FVector FleeDir = Orders[i].bHasTarget
-					? (CurrentPos - Orders[i].TargetPosition).GetSafeNormal2D()
-					: -Transforms[i].GetTransform().GetUnitAxis(EAxis::X);
+				// Latch the flee direction ONCE on the first routing frame.
+				// This avoids two bugs:
+				//   1) TargetPosition ≈ CurrentPos (after halt) → zero vector
+				//      → soldier drifts on jitter alone (random direction)
+				//   2) Fidget rotated the soldier's facing pre-panic → -forward
+				//      points sideways or even toward the enemy.
+				// By capturing once, the direction stays stable for the whole rout.
+				FVector& FleeDir = Velocities[i].FleeDirection;
+				if (FleeDir.IsNearlyZero())
+				{
+					// Priority 1: flee away from known enemy position (engagement)
+					if (Orders[i].bHasFaceTarget)
+					{
+						FleeDir = (CurrentPos - Orders[i].FaceTarget).GetSafeNormal2D();
+					}
+					// Priority 2: flee away from formation target (if far enough
+					// to give a meaningful direction — not a halt-in-place slot)
+					if (FleeDir.IsNearlyZero() && Orders[i].bHasTarget)
+					{
+						const FVector Away = CurrentPos - Orders[i].TargetPosition;
+						if (Away.SizeSquared2D() > FMath::Square(200.f))
+							FleeDir = Away.GetSafeNormal2D();
+					}
+					// Priority 3: flee opposite of current facing (last resort —
+					// only for soldiers who panicked outside of combat/movement)
+					if (FleeDir.IsNearlyZero())
+					{
+						FleeDir = -Transforms[i].GetTransform().GetUnitAxis(EAxis::X);
+						FleeDir = FleeDir.GetSafeNormal2D();
+					}
+					// Final safety: if STILL zero (degenerate transform), pick +Y
+					if (FleeDir.IsNearlyZero())
+						FleeDir = FVector(0.f, 1.f, 0.f);
+				}
 
-				// Chaotic jitter while routing
+				// Chaotic jitter (adds nervous weaving, not a new heading)
 				const float JitterX = 50.f * FMath::Sin(WorldTime * 3.f + Seed * 6.28f);
 				const float JitterY = 50.f * FMath::Cos(WorldTime * 2.5f + Seed * 4.71f);
 
@@ -120,11 +151,14 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 
 				FTransform T = Transforms[i].GetTransform();
 				T.SetLocation(CurrentPos + Velocities[i].Velocity * DeltaTime);
-				if (!FleeDir.IsNearlyZero())
-					T.SetRotation(FRotationMatrix::MakeFromX(FleeDir).ToQuat());
+				T.SetRotation(FRotationMatrix::MakeFromX(FleeDir).ToQuat());
 				Transforms[i].GetMutableTransform() = T;
 				continue;
 			}
+
+			// Clear latched flee direction whenever NOT routing (so a fresh
+			// rout episode gets a fresh direction capture).
+			Velocities[i].FleeDirection = FVector::ZeroVector;
 
 			// ── Morale-dependent fidget (stationary states) ───────────────
 			// Low morale → soldiers shift nervously, look around

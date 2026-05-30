@@ -149,19 +149,50 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				}
 				break;
 
+			case EAgentState::SHAKEN:
+			{
+				// Wavering: hold position, hold fire (won't enter AIMING/FIRING).
+				// Steady slowly on your own; an officer aura or an NCO rallying
+				// nearby pulls morale up much faster (their processors do that).
+				// Climb past ShakenRecover → back into the firing line.
+				constexpr float ShakenSteadyRate = 1.5f;   // morale/s passive recovery
+				MF.Morale = FMath::Min(100.f, MF.Morale + ShakenSteadyRate * DT);
+				if (MF.Morale >= CF.ShakenRecover)
+				{
+					SF.State      = EAgentState::HOLDING;
+					SF.StateTimer = 0.f;
+				}
+				break;
+			}
+
 			case EAgentState::MELEE:
 			case EAgentState::PINNED:
 				break;
 			}
 
-			// Panic check after per-state logic
-			if (SF.State != EAgentState::DEAD    &&
+			// ── Morale breakpoints after per-state logic (two-tier) ────────
+			// Tier 1: morale < PanicThreshold      → ROUTING  (full panic, run)
+			// Tier 2: morale < ShakenThreshold     → SHAKEN   (wavering, hold fire)
+			// SHAKEN only from a stationary combat stance; advancing/melee/pinned
+			// soldiers don't freeze. SHAKEN itself can still fall through to ROUTING.
+			if (SF.State != EAgentState::DEAD     &&
 				SF.State != EAgentState::ROUTING  &&
-				SF.State != EAgentState::RALLYING &&
-				MF.Morale < CF.PanicThreshold)
+				SF.State != EAgentState::RALLYING)
 			{
-				SF.State     = EAgentState::ROUTING;
-				SF.StateTimer = 0.f;
+				if (MF.Morale < CF.PanicThreshold)
+				{
+					SF.State      = EAgentState::ROUTING;
+					SF.StateTimer = 0.f;
+				}
+				else if ((SF.State == EAgentState::HOLDING ||
+				          SF.State == EAgentState::LOADING ||
+				          SF.State == EAgentState::AIMING  ||
+				          SF.State == EAgentState::FIRING) &&
+				         MF.Morale < CF.ShakenThreshold)
+				{
+					SF.State      = EAgentState::SHAKEN;
+					SF.StateTimer = 0.f;
+				}
 			}
 		}
 	});

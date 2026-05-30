@@ -80,8 +80,24 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 	// -------------------------------------------------------------------
 	// Pass 1: NCO AI — find target, move, deliver order / rally
 	// -------------------------------------------------------------------
+	// ClaimedTargets prevents multiple NCOs from dog-piling the same soldier.
+	// An NCO that already has a target "claims" it; others will skip him.
+	TSet<FMassEntityHandle> ClaimedTargets;
+
+	// Pre-seed with targets NCOs already hold from previous frames.
 	NCOQuery.ForEachEntityChunk(Context,
-		[&Soldiers, &EntityManager, DT](FMassExecutionContext& Ctx)
+		[&ClaimedTargets](FMassExecutionContext& Ctx)
+	{
+		const auto NCOs = Ctx.GetFragmentView<FNCOFragment>();
+		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i)
+		{
+			if (NCOs[i].bIsAlive && NCOs[i].bHasTarget)
+				ClaimedTargets.Add(NCOs[i].TargetSoldier);
+		}
+	});
+
+	NCOQuery.ForEachEntityChunk(Context,
+		[&Soldiers, &EntityManager, &ClaimedTargets, DT](FMassExecutionContext& Ctx)
 	{
 		auto       Transforms = Ctx.GetMutableFragmentView<FTransformFragment>();
 		auto       NCOs       = Ctx.GetMutableFragmentView<FNCOFragment>();
@@ -112,8 +128,9 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 						bStillValid = true;
 						break;
 					}
-					// Routing: still needs rally
-					if (S.State == EAgentState::ROUTING)
+					// Routing/shaken: still needs steadying
+					if (S.State == EAgentState::ROUTING ||
+						S.State == EAgentState::SHAKEN)
 					{
 						bStillValid = true;
 						break;
@@ -133,12 +150,16 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				float BestDistSq = FLT_MAX;
 				int32 BestIdx    = INDEX_NONE;
 
-				// Priority 1: routing soldiers (rally)
+				// Priority 1: wavering (SHAKEN) or routing soldiers — steady/rally.
+				// SHAKEN included so NCOs run up BEFORE the man fully breaks.
+				// Skip soldiers another NCO is already chasing (ClaimedTargets).
 				for (int32 s = 0; s < Soldiers.Num(); ++s)
 				{
 					const FNCOSoldierSnap& S = Soldiers[s];
 					if (S.SquadId != MySquad) continue;
-					if (S.State != EAgentState::ROUTING) continue;
+					if (S.State != EAgentState::ROUTING &&
+						S.State != EAgentState::SHAKEN) continue;
+					if (ClaimedTargets.Contains(S.Handle)) continue;
 
 					const float DistSq = (S.Position - NCOPos).SizeSquared2D();
 					if (DistSq < BestDistSq)
@@ -158,7 +179,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 						if (S.State == EAgentState::DEAD) continue;
 						if (S.bOrderExecuted) continue;
 						if (!S.bOrderIgnored && S.bOrderReceived) continue;
-						// This soldier is a straggler
+						if (ClaimedTargets.Contains(S.Handle)) continue;
 
 						const float DistSq = (S.Position - NCOPos).SizeSquared2D();
 						if (DistSq < BestDistSq)
@@ -173,6 +194,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				{
 					NCO.TargetSoldier = Soldiers[BestIdx].Handle;
 					NCO.bHasTarget    = true;
+					ClaimedTargets.Add(Soldiers[BestIdx].Handle);
 				}
 			}
 
@@ -241,9 +263,11 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				// Close enough to interact
 				if (DistToTarget < 200.f)
 				{
-					if (TargetState == EAgentState::ROUTING)
+					if (TargetState == EAgentState::ROUTING ||
+						TargetState == EAgentState::SHAKEN)
 					{
-						// Rally: boost morale of routing soldier (continuous)
+						// Rally: boost morale of routing/shaken soldier (continuous).
+						// NCO at his side steadies him faster than passive recovery.
 						if (EntityManager.IsEntityValid(NCO.TargetSoldier))
 						{
 							FMoraleFragment& TargetMF =
@@ -251,7 +275,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 							TargetMF.Morale = FMath::Min(100.f,
 								TargetMF.Morale + NCO.RallyMoraleBoost * DT);
 						}
-						// Stay with routing soldier (don't clear target)
+						// Stay with him until he steadies (don't clear target)
 					}
 					else
 					{
@@ -278,7 +302,8 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				for (const FNCOSoldierSnap& S : Soldiers)
 				{
 					if (S.SquadId != MySquad) continue;
-					if (S.State != EAgentState::ROUTING) continue;
+					if (S.State != EAgentState::ROUTING &&
+						S.State != EAgentState::SHAKEN) continue;
 
 					const float DistSq = (S.Position - NCOPos).SizeSquared2D();
 					if (DistSq < FMath::Square(NCO.RallyRadius))
@@ -288,7 +313,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 							FMoraleFragment& SMF =
 								EntityManager.GetFragmentDataChecked<FMoraleFragment>(S.Handle);
 							SMF.Morale = FMath::Min(100.f,
-								SMF.Morale + NCO.RallyMoraleBoost * 0.5f * DT);
+								SMF.Morale + NCO.RallyMoraleBoost * 0.3f * DT);
 						}
 					}
 				}

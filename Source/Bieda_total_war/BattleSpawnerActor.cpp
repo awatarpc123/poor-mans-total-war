@@ -339,7 +339,7 @@ void ABattleSpawnerActor::SpawnAgents()
 			NCO.FormationPos    = NCOPos;
 			NCO.bHasFormationPos = true;
 			NCO.MoveSpeed       = MarchSpeed;     // formation pace (SetForceRun syncs this)
-			NCO.ChaseSpeed      = CatchUpSpeed;   // when chasing stragglers/routing
+			NCO.ChaseSpeed      = 450.f;          // when chasing stragglers/routing (decoupled from soldier CatchUpSpeed)
 
 			FFactionFragment& NFF = EM.GetFragmentDataChecked<FFactionFragment>(NCOEntity);
 			NFF.TeamId  = TeamId;
@@ -909,8 +909,8 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 
 	const FMassEntityManager& EM = Subsystem->GetEntityManager();
 
-	// Count each state
-	int32 StateCounts[10] = {};
+	// Count each state (array sized to EAgentState count: 11, incl. SHAKEN)
+	int32 StateCounts[11] = {};
 	for (const FMassEntityHandle& Entity : SpawnedEntities)
 	{
 		if (!EM.IsEntityValid(Entity)) continue;
@@ -922,7 +922,7 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 	// Find dominant
 	int32 MaxCount = 0;
 	EAgentState Dominant = EAgentState::HOLDING;
-	for (int32 s = 0; s < 10; ++s)
+	for (int32 s = 0; s < 11; ++s)
 	{
 		if (StateCounts[s] > MaxCount)
 		{
@@ -940,6 +940,7 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 	case EAgentState::ADVANCING: return TEXT("Maszeruje");
 	case EAgentState::ROUTING:   return TEXT("PANIKA!");
 	case EAgentState::RALLYING:  return TEXT("Zbiera sie");
+	case EAgentState::SHAKEN:    return TEXT("Chwieje sie");
 	default:                     return TEXT("---");
 	}
 }
@@ -1190,14 +1191,26 @@ void ABattleSpawnerActor::UpdateEngagement()
 			OF.TargetPosition = EngagePos + FormRot.RotateVector(LocalOffset);
 			OF.bHasTarget     = true;
 
-			// If out of range, make soldier advance again
+			// If out of range, force-advance soldiers who ALREADY heard the
+			// engage order (bOrderExecuted=true) and are now idle (shooting/
+			// holding). They already know they're fighting — this is just
+			// chasing the enemy, not a new order.
+			// DON'T touch soldiers still waiting for the initial propagation
+			// wave (bOrderExecuted=false) — let the wave reach them naturally.
 			if (bOutOfRange)
 			{
-				FAgentStateFragment& SFMut = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
-				if (SFMut.State == EAgentState::HOLDING || SFMut.State == EAgentState::LOADING)
+				const FOrderPropagationFragment& PF =
+					EM.GetFragmentDataChecked<FOrderPropagationFragment>(Entity);
+				if (PF.bOrderExecuted)
 				{
-					SFMut.State      = EAgentState::ADVANCING;
-					SFMut.StateTimer = 0.f;
+					FAgentStateFragment& SFMut =
+						EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
+					if (SFMut.State == EAgentState::HOLDING ||
+						SFMut.State == EAgentState::LOADING)
+					{
+						SFMut.State      = EAgentState::ADVANCING;
+						SFMut.StateTimer = 0.f;
+					}
 				}
 			}
 		}

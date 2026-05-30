@@ -35,6 +35,7 @@ enum class EAgentState : uint8
 	MELEE     UMETA(DisplayName = "Melee"),
 	ROUTING   UMETA(DisplayName = "Routing"),
 	RALLYING  UMETA(DisplayName = "Rallying"),
+	SHAKEN    UMETA(DisplayName = "Shaken"),
 	PINNED    UMETA(DisplayName = "Pinned"),
 	DEAD      UMETA(DisplayName = "Dead"),
 };
@@ -98,6 +99,11 @@ struct BIEDA_TOTAL_WAR_API FAgentVelocityFragment : public FMassFragment
 	int32 FormationRow  = 0;       // row index (0 = front)
 	int32 FormationCol  = 0;       // column index in row
 	float CurveOffset   = 0.f;    // organic per-entity offset perpendicular to front line (cm)
+
+	// ── Routing flee direction (latched once on entering ROUTING) ────────────
+	// Captured at the moment of panic so it stays stable (fidget can't corrupt
+	// it) and always points AWAY from the enemy.  Zero = not yet latched.
+	FVector FleeDirection = FVector::ZeroVector;
 };
 
 USTRUCT()
@@ -114,7 +120,9 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	float MoraleDrainFire    = 15.f;
 	float MoraleDrainLoading = 0.5f;
 	float RouteRecoveryRate  = 3.f;
-	float PanicThreshold     = 20.f;
+	float PanicThreshold     = 20.f;   // morale < this → ROUTING (full panic, run)
+	float ShakenThreshold    = 40.f;   // PanicThreshold ≤ morale < this → SHAKEN (wavering, hold fire)
+	float ShakenRecover      = 50.f;   // morale ≥ this → SHAKEN steadies back to HOLDING (hysteresis)
 
 	// ── Health ──────────────────────────────────────────────────────────────
 	float HP = 100.f;
@@ -184,7 +192,7 @@ struct BIEDA_TOTAL_WAR_API FNCOFragment : public FMassFragment
 
 	bool  bIsAlive    = true;
 	float MoveSpeed   = 200.f;   // cm/s — formation pace when returning to FormationPos
-	float ChaseSpeed  = 600.f;   // cm/s — when chasing a straggler or routing soldier
+	float ChaseSpeed  = 450.f;   // cm/s — when chasing a straggler or routing soldier
 
 	// Current assignment — soldier being chased
 	FMassEntityHandle TargetSoldier;
@@ -195,7 +203,7 @@ struct BIEDA_TOTAL_WAR_API FNCOFragment : public FMassFragment
 	bool    bHasFormationPos = false;
 
 	// Rally stats
-	float RallyMoraleBoost = 5.f;    // morale/s boost to routing soldiers within radius
+	float RallyMoraleBoost = 2.5f;   // morale/s boost to routing/shaken soldiers within radius
 	float RallyRadius      = 300.f;  // cm
 };
 
