@@ -38,6 +38,7 @@ public:
 		CardBG  = FLinearColor(0.05f, 0.05f, 0.08f, 0.93f);
 		ActiveBtn  = FLinearColor(0.08f, 0.35f, 0.65f, 1.f);
 		InactiveBtn = FLinearColor(0.22f, 0.22f, 0.28f, 1.f);
+		ActionBtn  = FLinearColor(0.6f, 0.32f, 0.1f, 1.f);   // momentary commands (Stać)
 
 		ChildSlot
 		[
@@ -59,92 +60,35 @@ public:
 				[
 					SAssignNew(UnitPanelBorder, SBorder)
 					.BorderBackgroundColor(PanelBG)
-					.Padding(12.f)
+					.Padding(16.f)
 					.Visibility_Lambda([this]() { return GetSelectedSpawner() ? EVisibility::Visible : EVisibility::Collapsed; })
 					[
 						SNew(SVerticalBox)
 
-						// Row 1: Unit name + HP
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 4.f)
+						// ── Header: name · state · HP ──────────────────────
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)
 						[
 							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot().FillWidth(1.f)
+							+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
 							[
 								SAssignNew(UnitNameText, STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 18))
 								.ColorAndOpacity(FSlateColor(FLinearColor::White))
 								.Text_Lambda([this]() { return FText::FromString(GetUnitName()); })
 							]
-							+ SHorizontalBox::Slot().AutoWidth()
-							[
-								SAssignNew(HPText, STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
-								.ColorAndOpacity(FSlateColor(FLinearColor::White))
-								.Text_Lambda([this]() { return FText::FromString(GetHPString()); })
-							]
-						]
-
-						// Row 2: Morale bar + State
-						+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 8.f)
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot().FillWidth(0.6f).VAlign(VAlign_Center)
-							[
-								SNew(SBox).HeightOverride(16.f)
-								[
-									SNew(SOverlay)
-									// BG
-									+ SOverlay::Slot()
-									[
-										SNew(SBorder)
-										.BorderBackgroundColor(FLinearColor(0.1f, 0.1f, 0.1f, 1.f))
-									]
-									// Fill
-									+ SOverlay::Slot()
-									[
-										SNew(SBox)
-										.HAlign(HAlign_Left)
-										.WidthOverride_Lambda([this]() -> FOptionalSize
-										{
-											const float Pct = GetMoralePct();
-											return FOptionalSize(Pct * 200.f);
-										})
-										[
-											SNew(SBorder)
-											.BorderBackgroundColor_Lambda([this]() -> FSlateColor
-											{
-												const float M = GetMoralePct();
-												if (M > 0.6f) return FLinearColor::Green;
-												if (M > 0.3f) return FLinearColor::Yellow;
-												return FLinearColor::Red;
-											})
-										]
-									]
-								]
-							]
-							+ SHorizontalBox::Slot().AutoWidth().Padding(8.f, 0.f, 0.f, 0.f)
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(12.f, 0.f, 12.f, 0.f)
 							[
 								SNew(STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 12))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f)))
-								.Text_Lambda([this]() -> FText
-								{
-									return FText::FromString(FString::Printf(TEXT("Morale: %.0f%%"), GetMoralePct() * 100.f));
-								})
-							]
-							+ SHorizontalBox::Slot().FillWidth(0.4f).HAlign(HAlign_Right)
-							[
-								SNew(STextBlock)
-								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 13))
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
 								.ColorAndOpacity_Lambda([this]() -> FSlateColor
 								{
 									ABattleSpawnerActor* S = GetSelectedSpawner();
 									if (!S) return FLinearColor::White;
 									const FString St = S->GetDominantStateString();
-									if (St == TEXT("PANIKA!"))    return FLinearColor::Red;
-									if (St == TEXT("Strzela!"))   return FLinearColor::Yellow;
-									if (St == TEXT("Maszeruje"))  return FLinearColor::Green;
-									return FLinearColor::White;
+									if (St == TEXT("PANIKA!"))   return FLinearColor::Red;
+									if (St == TEXT("Strzela!"))  return FLinearColor::Yellow;
+									if (St == TEXT("Maszeruje")) return FLinearColor(0.4f, 0.85f, 0.4f);
+									return FLinearColor(0.82f, 0.82f, 0.9f);
 								})
 								.Text_Lambda([this]() -> FText
 								{
@@ -152,44 +96,109 @@ public:
 									return S ? FText::FromString(S->GetDominantStateString()) : FText::GetEmpty();
 								})
 							]
+							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+							[
+								SAssignNew(HPText, STextBlock)
+								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
+								.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.9f, 0.9f)))
+								.Text_Lambda([this]() { return FText::FromString(GetHPString()); })
+							]
 						]
 
-						// Row 3: Command buttons
+						// ── Morale bar (wide, % centred on the bar) ────────
+						+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 12.f)
+						[
+							SNew(SBox).HeightOverride(20.f).WidthOverride(360.f)
+							[
+								SNew(SOverlay)
+								// BG track
+								+ SOverlay::Slot()
+								[
+									SNew(SBorder)
+									.BorderBackgroundColor(FLinearColor(0.08f, 0.08f, 0.1f, 1.f))
+								]
+								// Coloured fill
+								+ SOverlay::Slot().HAlign(HAlign_Left)
+								[
+									SNew(SBox)
+									.WidthOverride_Lambda([this]() -> FOptionalSize
+									{
+										return FOptionalSize(GetMoralePct() * 360.f);
+									})
+									[
+										SNew(SBorder)
+										.BorderBackgroundColor_Lambda([this]() -> FSlateColor
+										{
+											const float M = GetMoralePct();
+											if (M > 0.6f) return FLinearColor(0.15f, 0.6f, 0.2f, 1.f);
+											if (M > 0.3f) return FLinearColor(0.7f, 0.6f, 0.1f, 1.f);
+											return FLinearColor(0.65f, 0.15f, 0.12f, 1.f);
+										})
+									]
+								]
+								// Centred label
+								+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+								[
+									SNew(STextBlock)
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 11))
+									.ColorAndOpacity(FSlateColor(FLinearColor::White))
+									.Text_Lambda([this]() -> FText
+									{
+										return FText::FromString(FString::Printf(TEXT("Morale %.0f%%"), GetMoralePct() * 100.f));
+									})
+								]
+							]
+						]
+
+						// ── Command buttons: RUCH | OGIEŃ ──────────────────
 						+ SVerticalBox::Slot().AutoHeight()
 						[
 							SNew(SHorizontalBox)
 
-							// Movement group
-							+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
-							[
-								MakeCommandButton(TEXT("Marsz"), 1)
-							]
-							+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 16.f, 0.f)
-							[
-								MakeCommandButton(TEXT("Bieg"), 2)
-							]
-
-							// Separator
-							+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 16.f, 0.f)
-							[
-								SNew(STextBlock)
-								.Text(FText::FromString(TEXT("|")))
-								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 14))
-								.ColorAndOpacity(FSlateColor(FLinearColor(0.4f, 0.4f, 0.4f)))
-							]
-
-							// Fire mode group
-							+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
-							[
-								MakeCommandButton(TEXT("Swobodny"), 3)
-							]
-							+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
-							[
-								MakeCommandButton(TEXT("Salwa"), 4)
-							]
+							// Movement group: Stać · Marsz · Bieg
 							+ SHorizontalBox::Slot().AutoWidth()
 							[
-								MakeCommandButton(TEXT("Rzedami"), 5)
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(2.f, 0.f, 0.f, 3.f)
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString(TEXT("RUCH")))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+									.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.62f)))
+								]
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SNew(SHorizontalBox)
+									+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 5.f, 0.f)
+									[ MakeCommandButton(TEXT("Stać"), 6, /*bAction*/ true) ]
+									+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 5.f, 0.f)
+									[ MakeCommandButton(TEXT("Marsz"), 1) ]
+									+ SHorizontalBox::Slot().AutoWidth()
+									[ MakeCommandButton(TEXT("Bieg"), 2) ]
+								]
+							]
+
+							// Gap between groups
+							+ SHorizontalBox::Slot().AutoWidth().Padding(22.f, 0.f, 0.f, 0.f)
+							[
+								SNew(SVerticalBox)
+								+ SVerticalBox::Slot().AutoHeight().Padding(2.f, 0.f, 0.f, 3.f)
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString(TEXT("OGIEŃ")))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+									.ColorAndOpacity(FSlateColor(FLinearColor(0.55f, 0.55f, 0.62f)))
+								]
+								+ SVerticalBox::Slot().AutoHeight()
+								[
+									SNew(SHorizontalBox)
+									+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 5.f, 0.f)
+									[ MakeCommandButton(TEXT("Swobodny"), 3) ]
+									+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 5.f, 0.f)
+									[ MakeCommandButton(TEXT("Salwa"), 4) ]
+									+ SHorizontalBox::Slot().AutoWidth()
+									[ MakeCommandButton(TEXT("Rzędami"), 5) ]
+								]
 							]
 						]
 					]
@@ -224,6 +233,7 @@ private:
 	FLinearColor CardBG;
 	FLinearColor ActiveBtn;
 	FLinearColor InactiveBtn;
+	FLinearColor ActionBtn;
 
 	// Widget refs
 	TSharedPtr<SBorder> UnitPanelBorder;
@@ -272,7 +282,7 @@ private:
 
 	// ── Button helper ────────────────────────────────────────────────────
 
-	TSharedRef<SWidget> MakeCommandButton(const FString& Label, int32 CmdIndex)
+	TSharedRef<SWidget> MakeCommandButton(const FString& Label, int32 CmdIndex, bool bAction = false)
 	{
 		return SNew(SButton)
 			.ContentPadding(0.f)
@@ -284,25 +294,27 @@ private:
 			})
 			[
 				SNew(SBorder)
-				.Padding(FMargin(12.f, 6.f))
-				.BorderBackgroundColor_Lambda([this, CmdIndex]() -> FSlateColor
+				.Padding(FMargin(14.f, 7.f))
+				.HAlign(HAlign_Center)
+				.BorderBackgroundColor_Lambda([this, CmdIndex, bAction]() -> FSlateColor
 				{
+					if (bAction) return ActionBtn;   // momentary action — fixed accent
 					return IsCommandActive(CmdIndex) ? ActiveBtn : InactiveBtn;
 				})
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(Label))
-					.Font_Lambda([this, CmdIndex]() -> FSlateFontInfo
+					.Font_Lambda([this, CmdIndex, bAction]() -> FSlateFontInfo
 					{
-						return IsCommandActive(CmdIndex)
+						return (bAction || IsCommandActive(CmdIndex))
 							? FCoreStyle::GetDefaultFontStyle("Bold", 12)
-							: FCoreStyle::GetDefaultFontStyle("Regular", 11);
+							: FCoreStyle::GetDefaultFontStyle("Regular", 12);
 					})
-					.ColorAndOpacity_Lambda([this, CmdIndex]() -> FSlateColor
+					.ColorAndOpacity_Lambda([this, CmdIndex, bAction]() -> FSlateColor
 					{
-						return IsCommandActive(CmdIndex)
+						return (bAction || IsCommandActive(CmdIndex))
 							? FSlateColor(FLinearColor::White)
-							: FSlateColor(FLinearColor(0.7f, 0.7f, 0.7f));
+							: FSlateColor(FLinearColor(0.72f, 0.72f, 0.78f));
 					})
 				]
 			];
@@ -320,6 +332,7 @@ private:
 		case 3: S->SetVolleyModeRuntime(EVolleyMode::FreeFire); break;
 		case 4: S->SetVolleyModeRuntime(EVolleyMode::SquadVolley); break;
 		case 5: S->SetVolleyModeRuntime(EVolleyMode::RankFire); break;
+		case 6: S->IssueHaltOrder(); break;   // "Stać" — halt & dress in place
 		}
 	}
 

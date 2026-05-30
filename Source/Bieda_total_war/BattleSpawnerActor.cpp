@@ -616,6 +616,196 @@ void ABattleSpawnerActor::HoldPosition()
 	}
 }
 
+void ABattleSpawnerActor::IssueHaltOrder()
+{
+	// "Stać" — halt and dress the ranks where the unit currently stands.
+	// The front rank is anchored on the MOST-ADVANCED soldier (rank 1 = frontmost);
+	// everyone else dresses forward to him, so the line tightens without the front
+	// edge stepping back. The order is delivered through the same officer→drummer→
+	// peer propagation wave as a normal move order, so soldiers stop with a natural
+	// stagger and bleed off running speed. Type-agnostic: militia dress loosely,
+	// line infantry tightly (their per-soldier tolerances do the rest).
+
+	EngagedTarget = nullptr;
+	ClearFaceTarget();
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UMassEntitySubsystem* Subsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (!Subsystem) return;
+
+	FMassEntityManager& EM = Subsystem->GetMutableEntityManager();
+
+	// ── Gather living soldiers: handle + position + averaged facing ──────────
+	TArray<FMassEntityHandle> Living;
+	TArray<FVector>           LivePos;
+	Living.Reserve(SpawnedEntities.Num());
+	LivePos.Reserve(SpawnedEntities.Num());
+	FVector FacingSum = FVector::ZeroVector;
+
+	for (const FMassEntityHandle& E : SpawnedEntities)
+	{
+		if (!EM.IsEntityValid(E)) continue;
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+		if (SF.State == EAgentState::DEAD) continue;
+
+		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(E);
+		Living.Add(E);
+		LivePos.Add(TF.GetTransform().GetLocation());
+		FacingSum += TF.GetTransform().GetUnitAxis(EAxis::X);
+	}
+
+	const int32 N = Living.Num();
+	if (N == 0) return;
+
+	// ── Forward (facing) + lateral basis ─────────────────────────────────────
+	FVector Fwd = FacingSum.GetSafeNormal2D();
+	if (Fwd.IsNearlyZero()) Fwd = SpawnFacing.Vector().GetSafeNormal2D();
+	if (Fwd.IsNearlyZero()) Fwd = FVector(1.f, 0.f, 0.f);
+	const FVector LatDir(-Fwd.Y, Fwd.X, 0.f);   // horizontal, perpendicular to Fwd
+
+	// ── Decompose positions: forward coord, lateral coord; front anchor ──────
+	TArray<float> Fcoord; Fcoord.SetNumUninitialized(N);
+	TArray<float> Lcoord; Lcoord.SetNumUninitialized(N);
+	float FrontF  = -FLT_MAX;
+	float LatSum  = 0.f;
+	float ZSum    = 0.f;
+	for (int32 i = 0; i < N; ++i)
+	{
+		Fcoord[i] = FVector::DotProduct(LivePos[i], Fwd);
+		Lcoord[i] = FVector::DotProduct(LivePos[i], LatDir);
+		FrontF    = FMath::Max(FrontF, Fcoord[i]);
+		LatSum   += Lcoord[i];
+		ZSum     += LivePos[i].Z;
+	}
+	const float LatCenter = LatSum / N;
+	const float BaseZ     = ZSum  / N;
+
+	// ── Column count: keep the formation's current width ─────────────────────
+	int32 Cols;
+	if (CurrentRowSize > 0)
+		Cols = FMath::Clamp(CurrentRowSize, 1, N);
+	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
+		Cols = FMath::Max(1, FMath::CeilToInt(N / 2.f));
+	else
+		Cols = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)N)));
+	const int32 Rows      = FMath::Max(1, FMath::CeilToInt((float)N / Cols));
+	const float HalfFront = Cols * SpawnSpacing * 0.5f;
+
+	// ── Slot assignment: frontmost soldiers fill the front rank, dress forward.
+	// Sort all soldiers front→back, then within each rank sort left→right so men
+	// keep their side and don't cross over each other.
+	TArray<int32> Order;
+	Order.SetNumUninitialized(N);
+	for (int32 i = 0; i < N; ++i) Order[i] = i;
+	Order.Sort([&Fcoord](int32 A, int32 B) { return Fcoord[A] > Fcoord[B]; });
+
+	TArray<int32> Slot;            // Slot[k] = index into Living for slot k
+	Slot.SetNumUninitialized(N);
+	for (int32 r = 0; r < Rows; ++r)
+	{
+		const int32 Start = r * Cols;
+		const int32 Count = FMath::Min(Cols, N - Start);
+
+		TArray<int32> RankIdx;
+		RankIdx.Reserve(Count);
+		for (int32 c = 0; c < Count; ++c) RankIdx.Add(Order[Start + c]);
+		RankIdx.Sort([&Lcoord](int32 A, int32 B) { return Lcoord[A] < Lcoord[B]; });
+
+		for (int32 c = 0; c < Count; ++c) Slot[Start + c] = RankIdx[c];
+	}
+
+	// ── Apply dressed slots + reset order propagation (re-arm the wave) ──────
+	for (int32 k = 0; k < N; ++k)
+	{
+		const int32 Row = k / Cols;
+		const int32 Col = k % Cols;
+		const FMassEntityHandle E = Living[Slot[k]];
+
+		const float SlotF = FrontF - Row * SpawnSpacing;
+		const float SlotL = LatCenter + (Col - (Cols - 1) * 0.5f) * SpawnSpacing;
+		const FVector SlotPos = Fwd * SlotF + LatDir * SlotL + FVector(0.f, 0.f, BaseZ);
+
+		FOrderFragment& OF = EM.GetFragmentDataChecked<FOrderFragment>(E);
+		OF.TargetPosition  = SlotPos;
+		OF.bHasTarget      = true;
+
+		FAgentVelocityFragment& VF = EM.GetFragmentDataChecked<FAgentVelocityFragment>(E);
+		VF.FormationRow = Row;
+		VF.FormationCol = Col;
+		VF.bForceRun    = false;   // settle at march pace — bleed off the run
+		{
+			const float ColNorm = (Cols > 1)
+				? static_cast<float>(Col) / static_cast<float>(Cols - 1) : 0.5f;
+			VF.CurveOffset = FormationCurveStrength * FMath::Sin(ColNorm * UE_PI)
+				+ FormationCurveStrength * 0.3f
+				  * FMath::Sin(ColNorm * UE_PI * 2.f + VF.NoiseSeed * 6.28f);
+		}
+
+		FOrderPropagationFragment& PF = EM.GetFragmentDataChecked<FOrderPropagationFragment>(E);
+		PF.bOrderReceived = false;
+		PF.bOrderExecuted = false;
+		PF.bOrderIgnored  = false;
+		PF.ExecutionTimer = 0.f;
+		PF.ExecutionDelay = 0.f;
+
+		FAgentCombatFragment& CF = EM.GetFragmentDataChecked<FAgentCombatFragment>(E);
+		CF.bVolleyReady  = false;
+		CF.bVolleySignal = false;
+
+		FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+		if (SF.State != EAgentState::DEAD)
+		{
+			SF.State      = EAgentState::HOLDING;
+			SF.StateTimer = 0.f;
+		}
+	}
+
+	bForceRun = false;   // unit is at rest → Marsz footing
+
+	// ── Re-anchor officer / NCOs / drummers to the dressed formation ─────────
+	const float RearF = FrontF - (Rows - 1) * SpawnSpacing;   // last-rank depth
+
+	if (OfficerEntity.IsValid() && EM.IsEntityValid(OfficerEntity))
+	{
+		FOfficerFragment& OFF = EM.GetFragmentDataChecked<FOfficerFragment>(OfficerEntity);
+		OFF.FormationFrontPos   = Fwd * (FrontF + 100.f) + LatDir * LatCenter + FVector(0.f, 0.f, BaseZ);
+		OFF.bHasFormationTarget = true;
+		OFF.MoveSpeed           = MarchSpeed;
+	}
+
+	for (int32 n = 0; n < NCOEntities.Num(); ++n)
+	{
+		if (!EM.IsEntityValid(NCOEntities[n])) continue;
+		FNCOFragment& NCO = EM.GetFragmentDataChecked<FNCOFragment>(NCOEntities[n]);
+		const float Spread = (NCOEntities.Num() > 1)
+			? (static_cast<float>(n) / (NCOEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.8f
+			: 0.f;
+		NCO.FormationPos     = Fwd * (RearF - SpawnSpacing * 0.75f)
+			+ LatDir * (LatCenter + Spread) + FVector(0.f, 0.f, BaseZ);
+		NCO.bHasFormationPos = true;
+		NCO.bHasTarget       = false;
+		NCO.MoveSpeed        = MarchSpeed;
+	}
+
+	for (int32 d = 0; d < DrummerEntities.Num(); ++d)
+	{
+		if (!EM.IsEntityValid(DrummerEntities[d])) continue;
+		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntities[d]);
+		const float Spread = (DrummerEntities.Num() > 1)
+			? (static_cast<float>(d) / (DrummerEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
+			: 0.f;
+		DR.FormationPos     = Fwd * (RearF - SpawnSpacing * 0.4f)
+			+ LatDir * (LatCenter + Spread) + FVector(0.f, 0.f, BaseZ);
+		DR.bHasFormationPos = true;
+		DR.MoveSpeed        = MarchSpeed;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("BattleSpawner squad=%d: STAĆ — dress in place, cols=%d rows=%d N=%d"),
+		MySquadId, Cols, Rows, N);
+}
+
 FVector ABattleSpawnerActor::GetFormationCenter() const
 {
 	UWorld* World = GetWorld();

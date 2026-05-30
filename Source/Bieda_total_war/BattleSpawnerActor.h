@@ -183,6 +183,14 @@ public:
 	 *  Called when the player starts a new click/drag interaction. */
 	void HoldPosition();
 
+	/** Halt-and-dress ("Stać"): re-form the line exactly where it currently
+	 *  stands. The front rank is anchored on the MOST-ADVANCED soldier (he is
+	 *  rank 1), and everyone dresses forward to that line — no centroid step-back.
+	 *  The order still travels through the officer→drummer→peer wave, so the unit
+	 *  stops with a natural stagger and bleeds off running speed. Works for both
+	 *  militia and line infantry. */
+	void IssueHaltOrder();
+
 	/** Average world position of all living soldiers (used for selection). */
 	FVector GetFormationCenter() const;
 
