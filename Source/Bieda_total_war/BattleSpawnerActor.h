@@ -254,6 +254,20 @@ private:
 	int32 CurrentRowSize = -1;   // set at spawn, updated by drag-to-form
 	void SpawnAgents();
 
+	// ── Formation geometry (single source of truth) ──────────────────────────
+	// The slot math (rows, half-width, half-depth from a given row size) used to
+	// be copy-pasted across SpawnAgents / IssueMoveOrder / IssueEngageOrder /
+	// UpdateEngagement, which risked the layouts silently drifting apart.
+	// Compute it in one place instead.
+	struct FFormationDims
+	{
+		int32 Cols;        // soldiers per front-line row
+		int32 Rows;        // depth (number of ranks)
+		float HalfFront;   // half formation width  (cm)
+		float HalfDepth;   // half formation depth  (cm)
+	};
+	FFormationDims ComputeFormationDims(int32 InRowSize) const;
+
 	// ── Casualty shock + morale collapse ─────────────────────────────────────
 	// A transient morale-hit emitter dropped at the spot where a soldier died.
 	// Soldiers near it bleed morale (distance falloff); the source fades over

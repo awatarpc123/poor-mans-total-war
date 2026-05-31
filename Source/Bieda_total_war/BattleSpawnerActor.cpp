@@ -107,6 +107,16 @@ void ABattleSpawnerActor::UpdateStragglers()
 	}
 }
 
+ABattleSpawnerActor::FFormationDims ABattleSpawnerActor::ComputeFormationDims(int32 InRowSize) const
+{
+	FFormationDims D;
+	D.Cols      = FMath::Max(1, InRowSize);
+	D.Rows      = FMath::Max(1, FMath::CeilToInt((float)NumAgents / D.Cols));
+	D.HalfFront = D.Cols * SpawnSpacing * 0.5f;
+	D.HalfDepth = D.Rows * SpawnSpacing * 0.5f;
+	return D;
+}
+
 void ABattleSpawnerActor::SpawnAgents()
 {
 	UWorld* World = GetWorld();
@@ -152,9 +162,10 @@ void ABattleSpawnerActor::SpawnAgents()
 	}
 	CurrentRowSize = EffectiveRowSize;   // store for future quick-move orders
 
-	const int32 NumSpawnRows = FMath::Max(1, FMath::CeilToInt((float)NumAgents / EffectiveRowSize));
-	const float HalfFront = EffectiveRowSize * SpawnSpacing * 0.5f;   // half formation width
-	const float HalfDepth = NumSpawnRows    * SpawnSpacing * 0.5f;    // half formation depth
+	const FFormationDims Dims = ComputeFormationDims(EffectiveRowSize);
+	const int32 NumSpawnRows = Dims.Rows;
+	const float HalfFront    = Dims.HalfFront;   // half formation width
+	const float HalfDepth    = Dims.HalfDepth;   // half formation depth
 
 	SpawnedEntities.Reserve(NumAgents);
 
@@ -436,9 +447,10 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		CurrentRowSize = LocalRowSize;
 	}
 
-	const int32 NumRows   = FMath::Max(1, FMath::CeilToInt((float)NumAgents / LocalRowSize));
-	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
-	const float HalfDepth = NumRows * SpawnSpacing * 0.5f;
+	const FFormationDims Dims = ComputeFormationDims(LocalRowSize);
+	const int32 NumRows   = Dims.Rows;
+	const float HalfFront = Dims.HalfFront;
+	const float HalfDepth = Dims.HalfDepth;
 
 	// ── Determine front-line direction ────────────────────────────────────────
 	// FrontLineDir = direction soldiers spread along (left-to-right of formation)
@@ -1160,9 +1172,10 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 		: FMath::Max(3, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
 	CurrentRowSize = LocalRowSize;
 
-	const int32 NumRows   = FMath::Max(1, FMath::CeilToInt((float)NumAgents / LocalRowSize));
-	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
-	const float HalfDepth = NumRows * SpawnSpacing * 0.5f;
+	const FFormationDims Dims = ComputeFormationDims(LocalRowSize);
+	const int32 NumRows   = Dims.Rows;
+	const float HalfFront = Dims.HalfFront;
+	const float HalfDepth = Dims.HalfDepth;
 
 	// Front line perpendicular to march direction (toward enemy)
 	const FVector FrontLineDir = FVector(ToEnemy.Y, -ToEnemy.X, 0.f);
@@ -1287,9 +1300,10 @@ void ABattleSpawnerActor::UpdateEngagement()
 
 		const int32 LocalRowSize = (CurrentRowSize > 0) ? CurrentRowSize
 			: FMath::Max(3, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
-		const int32 NumRows   = FMath::Max(1, FMath::CeilToInt((float)NumAgents / LocalRowSize));
-		const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
-		const float HalfDepth = NumRows * SpawnSpacing * 0.5f;
+		const FFormationDims Dims = ComputeFormationDims(LocalRowSize);
+		const int32 NumRows   = Dims.Rows;
+		const float HalfFront = Dims.HalfFront;
+		const float HalfDepth = Dims.HalfDepth;
 
 		const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
 		for (int32 i = 0; i < SoldierCount; ++i)
