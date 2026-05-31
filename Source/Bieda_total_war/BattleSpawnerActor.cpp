@@ -1190,12 +1190,20 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 		OF.FaceTarget      = EnemyCenter;
 		OF.bHasFaceTarget  = true;
 
+		// Seed the advance wave EXPLICITLY (front rank first), instead of relying
+		// on the officer being close enough to "shout" the order the moment the
+		// order processor next runs. The officer starts marching toward the enemy
+		// immediately, so on an attack-move he can leave voice range before the
+		// processor seeds anyone — which left the whole company standing while
+		// only the officer advanced. A row-staggered delay reproduces the
+		// front-to-back ripple deterministically. OrderProcessor's "order
+		// received → ADVANCING" branch then drives every soldier.
 		FOrderPropagationFragment& PF = EM.GetFragmentDataChecked<FOrderPropagationFragment>(Entity);
-		PF.bOrderReceived = false;
+		PF.bOrderReceived = true;
 		PF.bOrderExecuted = false;
 		PF.bOrderIgnored  = false;
 		PF.ExecutionTimer = 0.f;
-		PF.ExecutionDelay = 0.f;
+		PF.ExecutionDelay = Row * 0.15f + FMath::FRandRange(0.f, 0.1f);
 
 		FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
 		if (SF.State != EAgentState::DEAD)
