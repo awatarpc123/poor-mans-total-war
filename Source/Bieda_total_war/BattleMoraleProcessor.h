@@ -36,13 +36,15 @@ private:
 	static constexpr float DeadRadius    =  500.f;
 	static constexpr float StableRadius  = 1000.f;
 
-	// Per-neighbor rates (/s)
+	// Per-neighbor rates (/s) — Routing/Shaken now distance-weighted (see .cpp)
 	static constexpr float RoutingDrainRate = 3.f;
 	static constexpr float DeadDrainRate    = 2.f;
+	static constexpr float ShakenDrainRate  = 1.5f;   // wavering neighbour unsettles you
 	static constexpr float StableBonusRate  = 0.5f;
 
 	// Caps on total effect (/s)
 	static constexpr float MaxRoutingDrain  = 6.f;
 	static constexpr float MaxDeadDrain     = 4.f;
+	static constexpr float MaxShakenDrain   = 3.f;
 	static constexpr float MaxStableBonus   = 3.f;
 };

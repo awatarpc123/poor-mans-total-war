@@ -28,6 +28,7 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 	UpdateEngagement();
 	UpdateVolley();
 	UpdateStragglers();
+	UpdateCasualtyShock(DeltaSeconds);
 	UpdateVisualization();
 }
 
@@ -804,6 +805,118 @@ void ABattleSpawnerActor::IssueHaltOrder()
 
 	UE_LOG(LogTemp, Log, TEXT("BattleSpawner squad=%d: STAĆ — dress in place, cols=%d rows=%d N=%d"),
 		MySquadId, Cols, Rows, N);
+}
+
+void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
+{
+	// Two coupled morale-collapse mechanisms, both emergent (no new state):
+	//   1) CASUALTY SHOCK — each death drops a local, time-decaying morale-hit
+	//      emitter where the soldier fell. Survivors nearby bleed morale by
+	//      distance falloff. A salvo stacks many emitters at once → the men by
+	//      the gap rout, and panic ripples back rank-by-rank via the existing
+	//      contagion. Trickle deaths decay before stacking → little effect.
+	//   2) ATTRITION CEILING — caps every soldier's morale at a value that
+	//      falls quadratically with losses. Near ~70% losses the ceiling sinks
+	//      under the rout threshold → the unit breaks "around 30% strength".
+	if (DeltaSeconds <= 0.f) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UMassEntitySubsystem* Subsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (!Subsystem) return;
+
+	FMassEntityManager& EM = Subsystem->GetMutableEntityManager();
+
+	const int32 Count = SpawnedEntities.Num();
+	if (Count == 0) return;
+
+	// Lazy init of bookkeeping arrays (first tick after spawn).
+	if (SoldierWasAlive.Num() != Count)
+	{
+		SoldierWasAlive.Init(true, Count);
+		InitialSoldierCount = FMath::Max(1, GetAliveCount());
+	}
+
+	// ── Pass 1: detect new deaths → spawn shock sources; count alive ────────
+	int32 AliveNow = 0;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FMassEntityHandle E = SpawnedEntities[i];
+		const bool bValid = EM.IsEntityValid(E);
+
+		bool bAlive = false;
+		FVector Pos = FVector::ZeroVector;
+		if (bValid)
+		{
+			const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+			bAlive = (SF.State != EAgentState::DEAD);
+			if (bAlive)
+			{
+				Pos = EM.GetFragmentDataChecked<FTransformFragment>(E).GetTransform().GetLocation();
+				++AliveNow;
+			}
+			else
+			{
+				Pos = EM.GetFragmentDataChecked<FTransformFragment>(E).GetTransform().GetLocation();
+			}
+		}
+
+		// Transition alive→dead this frame = a fresh casualty → emit shock.
+		if (SoldierWasAlive[i] && !bAlive)
+		{
+			ShockSources.Add({ Pos, ShockPerDeath });
+		}
+		SoldierWasAlive[i] = bAlive;
+	}
+
+	// ── Pass 2: decay shock sources; drop the spent ones ────────────────────
+	for (int32 s = ShockSources.Num() - 1; s >= 0; --s)
+	{
+		ShockSources[s].Strength -= ShockSources[s].Strength * ShockDecayRate * DeltaSeconds;
+		if (ShockSources[s].Strength < 1.f)
+			ShockSources.RemoveAtSwap(s);
+	}
+
+	// ── Attrition ceiling (squad-wide, quadratic in losses) ─────────────────
+	const float LossRatio = 1.f - (static_cast<float>(AliveNow) /
+		static_cast<float>(InitialSoldierCount));
+	const float Ceiling = FMath::Clamp(
+		100.f - AttritionCeilingPenalty * LossRatio * LossRatio, 0.f, 100.f);
+
+	const bool bHaveShocks = ShockSources.Num() > 0;
+	if (!bHaveShocks && Ceiling >= 100.f) return;   // nothing to apply this frame
+
+	const float FalloffSq = ShockFalloffRadius * ShockFalloffRadius;
+
+	// ── Pass 3: apply shock drain + ceiling to each living soldier ──────────
+	for (int32 i = 0; i < Count; ++i)
+	{
+		if (!SoldierWasAlive[i]) continue;   // dead — skip
+		const FMassEntityHandle E = SpawnedEntities[i];
+		if (!EM.IsEntityValid(E)) continue;
+
+		const FVector MyPos = EM.GetFragmentDataChecked<FTransformFragment>(E)
+			.GetTransform().GetLocation();
+		FMoraleFragment& MF = EM.GetFragmentDataChecked<FMoraleFragment>(E);
+
+		// Local casualty-shock drain — sum of nearby death emitters, each
+		// weighted by linear distance falloff (1 at the corpse, 0 at radius).
+		float Drain = 0.f;
+		for (const FShockSource& Src : ShockSources)
+		{
+			const float DistSq = (Src.Pos - MyPos).SizeSquared2D();
+			if (DistSq >= FalloffSq) continue;
+			const float Falloff = 1.f - FMath::Sqrt(DistSq) / ShockFalloffRadius;
+			Drain += Src.Strength * Falloff;
+		}
+		if (Drain > 0.f)
+			MF.Morale = FMath::Max(0.f, MF.Morale - Drain * DeltaSeconds);
+
+		// Attrition ceiling — morale can't sit above what the losses allow.
+		if (MF.Morale > Ceiling)
+			MF.Morale = Ceiling;
+	}
 }
 
 FVector ABattleSpawnerActor::GetFormationCenter() const

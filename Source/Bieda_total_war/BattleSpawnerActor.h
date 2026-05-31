@@ -117,6 +117,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat", meta = (ClampMin = "10", ClampMax = "180"))
 	float VisionHalfAngleDeg = 90.f;
 
+	// ── Morale collapse (casualty shock + attrition ceiling) ────────────────
+	/** Morale hit "intensity" emitted at each death spot. Nearby soldiers lose
+	 *  this (×distance falloff ×time decay) per second. A sudden salvo stacks
+	 *  many sources → instant rout; trickle deaths decay before stacking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0"))
+	float ShockPerDeath = 200.f;
+
+	/** Radius (cm) of a death's shock. Beyond this, no effect. Keep small
+	 *  (~1-2 ranks) so panic ripples back rank-by-rank, not all at once. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "50"))
+	float ShockFalloffRadius = 350.f;
+
+	/** How fast a death's shock fades (per second, exponential). Higher =
+	 *  shorter-lived shock = trickle deaths matter less, salvos matter more. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0.1"))
+	float ShockDecayRate = 1.5f;
+
+	/** Morale ceiling penalty at total wipe. Ceiling = 100 − this×lossRatio².
+	 *  ~180 → unit's morale ceiling drops under the rout threshold at ~70%
+	 *  losses (≈30% strength remaining) → slow attrition panic. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0"))
+	float AttritionCeilingPenalty = 180.f;
+
 	/** 0 = player, 1 = enemy, etc. Assigned to every entity via FFactionFragment. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Faction")
 	uint8 TeamId = 0;
@@ -230,6 +253,17 @@ private:
 	uint8 MySquadId = 0;
 	int32 CurrentRowSize = -1;   // set at spawn, updated by drag-to-form
 	void SpawnAgents();
+
+	// ── Casualty shock + morale collapse ─────────────────────────────────────
+	// A transient morale-hit emitter dropped at the spot where a soldier died.
+	// Soldiers near it bleed morale (distance falloff); the source fades over
+	// time. Local + decaying → a salvo (many at once) routs the survivors near
+	// the gap and the panic ripples back rank-by-rank (no squad-wide sync).
+	struct FShockSource { FVector Pos; float Strength; };
+	TArray<FShockSource> ShockSources;     // active death-shock emitters
+	TArray<bool>         SoldierWasAlive;   // per-soldier alive state last frame
+	int32                InitialSoldierCount = 0;  // for the attrition ceiling
+	void UpdateCasualtyShock(float DeltaSeconds);
 
 	// ── Engagement ──────────────────────────────────────────────────────────
 	UPROPERTY()

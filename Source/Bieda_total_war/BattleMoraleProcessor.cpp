@@ -165,6 +165,8 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			float DeadDrain    = 0.f;
 			float StableBonus  = 0.f;
 
+			float ShakenDrain = 0.f;
+
 			Grid.ForEachInRadius(MyPos, RoutingRadius, GlobalIdx,
 				[&](int32 j, float DistSq2D)
 				{
@@ -173,7 +175,23 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					switch (Snaps[j].State)
 					{
 					case EAgentState::ROUTING:
-						RoutingDrain += RoutingDrainRate;
+					{
+						// Distance-weighted contagion: a router right next to you
+						// is terrifying; one across the field barely registers.
+						// Linear falloff over RoutingRadius makes panic ripple
+						// back rank-by-rank instead of hitting the whole unit.
+						const float Falloff = 1.f - FMath::Sqrt(DistSq2D) / RoutingRadius;
+						RoutingDrain += RoutingDrainRate * FMath::Max(0.f, Falloff);
+						break;
+					}
+					case EAgentState::SHAKEN:
+						// A wavering neighbour unsettles you too, but far less than
+						// an outright router. Tight radius (StableRadius).
+						if (DistSq2D < FMath::Square(StableRadius))
+						{
+							const float Falloff = 1.f - FMath::Sqrt(DistSq2D) / StableRadius;
+							ShakenDrain += ShakenDrainRate * FMath::Max(0.f, Falloff);
+						}
 						break;
 					case EAgentState::DEAD:
 						if (DistSq2D < FMath::Square(DeadRadius))
@@ -188,9 +206,10 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 			RoutingDrain = FMath::Min(RoutingDrain, MaxRoutingDrain);
 			DeadDrain    = FMath::Min(DeadDrain,    MaxDeadDrain);
+			ShakenDrain  = FMath::Min(ShakenDrain,  MaxShakenDrain);
 			StableBonus  = FMath::Min(StableBonus,  MaxStableBonus);
 
-			Morale -= (RoutingDrain + DeadDrain) * DT;
+			Morale -= (RoutingDrain + DeadDrain + ShakenDrain) * DT;
 			Morale += StableBonus * DT;
 
 			// ── Officer effects — by SquadId (own officer only) ───────────
