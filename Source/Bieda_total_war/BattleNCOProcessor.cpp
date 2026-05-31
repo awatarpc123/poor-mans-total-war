@@ -297,7 +297,8 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 			}
 
 			// ── Rally aura: boost morale of ALL nearby routing squadmates ─
-			if (!NCO.bHasTarget || true)  // always apply aura
+			// (Applied unconditionally — the aura helps even while the NCO is
+			// busy escorting a specific target.)
 			{
 				for (const FNCOSoldierSnap& S : Soldiers)
 				{
