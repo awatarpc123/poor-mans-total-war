@@ -142,6 +142,16 @@ void ABattleSpawnerActor::SpawnAgents()
 	};
 	FMassArchetypeHandle Archetype = EM.CreateArchetype(Fragments);
 
+	// Line infantry fights by DISCIPLINED VOLLEY by default — the whole company
+	// holds, then fires together (both ranks at once), then reloads together.
+	// Militia stays on FreeFire (loose, individual, ragged). The designer can
+	// still override VolleyMode in the editor before play; we only auto-promote
+	// the FreeFire default, never stomp an explicit SquadVolley/RankFire choice.
+	if (UnitType == EUnitType::LineInfantry && VolleyMode == EVolleyMode::FreeFire)
+	{
+		VolleyMode = EVolleyMode::SquadVolley;
+	}
+
 	const FVector Base = GetActorLocation();
 
 	// RowSize: 0 = auto, otherwise use value from editor.
@@ -264,16 +274,24 @@ void ABattleSpawnerActor::SpawnAgents()
 		CF.bVolleyReady       = false;
 		CF.bVolleySignal      = false;
 
-		// Line infantry: tighter reload variance; militia: wider
+		// Per-type combat + nerve. Line infantry are drilled regulars: tighter
+		// reload/accuracy spread AND steadier nerve (they break later). Militia
+		// are ragged: wider spread AND jumpier (they break sooner). The morale
+		// thresholds drive the state machine — ShakenThreshold = start wavering /
+		// hold fire, PanicThreshold = full rout.
 		if (UnitType == EUnitType::LineInfantry)
 		{
-			CF.ReloadDuration = SoldierReloadTime * FMath::RandRange(0.9f, 1.1f);
-			CF.Accuracy       = SoldierAccuracy   * FMath::RandRange(0.85f, 1.15f);
+			CF.ReloadDuration  = SoldierReloadTime * FMath::RandRange(0.9f, 1.1f);
+			CF.Accuracy        = SoldierAccuracy   * FMath::RandRange(0.85f, 1.15f);
+			CF.ShakenThreshold = 30.f;   // steady — only wavers when badly hurt
+			CF.PanicThreshold  = 12.f;   // routs late
 		}
-		else
+		else  // Militia
 		{
-			CF.ReloadDuration = SoldierReloadTime * FMath::RandRange(0.8f, 1.2f);
-			CF.Accuracy       = SoldierAccuracy   * FMath::RandRange(0.75f, 1.25f);
+			CF.ReloadDuration  = SoldierReloadTime * FMath::RandRange(0.8f, 1.2f);
+			CF.Accuracy        = SoldierAccuracy   * FMath::RandRange(0.75f, 1.25f);
+			CF.ShakenThreshold = 50.f;   // jumpy — wavers early
+			CF.PanicThreshold  = 30.f;   // routs sooner
 		}
 
 		FFactionFragment& FF = EM.GetFragmentDataChecked<FFactionFragment>(Entity);

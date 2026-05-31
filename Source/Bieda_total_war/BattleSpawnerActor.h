@@ -122,7 +122,7 @@ public:
 	 *  this (×distance falloff ×time decay) per second. A sudden salvo stacks
 	 *  many sources → instant rout; trickle deaths decay before stacking. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0"))
-	float ShockPerDeath = 200.f;
+	float ShockPerDeath = 50.f;
 
 	/** Radius (cm) of a death's shock. Beyond this, no effect. Keep small
 	 *  (~1-2 ranks) so panic ripples back rank-by-rank, not all at once. */
