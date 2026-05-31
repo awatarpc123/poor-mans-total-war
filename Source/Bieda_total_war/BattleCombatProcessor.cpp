@@ -116,8 +116,11 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			const FVector MyPos       = Positions[GlobalIdx];
 			const FVector MyForward   = Forwards[GlobalIdx];
 
-			// Friendly line-of-fire blocking is militia-only for now; line
-			// infantry keeps firing as before (volley logic comes later).
+			// Friendly line-of-fire blocking applies to MILITIA only. Line
+			// infantry fights by volley (SquadVolley/RankFire): both ranks fire
+			// together on command, so a rear-rank man firing "through" the front
+			// rank is the intended thin-red-line behaviour, not friendly fire.
+			// The volley coordinator (UpdateVolley) gates their timing instead.
 			const bool bUseLaneCheck = (Velocities[i].UnitType == EUnitType::Militia);
 
 			// ── AIMING: acquire / validate target ──────────────────────────
