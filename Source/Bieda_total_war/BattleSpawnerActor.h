@@ -290,7 +290,8 @@ private:
 
 	// ── Volley coordination ─────────────────────────────────────────────────
 	int32 CurrentVolleyRank = 0;   // for RankFire: which row fires next
-	void UpdateVolley();
+	float VolleyRankTimer   = 0.f; // RankFire: countdown gap between rank volleys
+	void UpdateVolley(float DeltaSeconds);
 
 	// ── Straggler detection ─────────────────────────────────────────────────
 	// Flags soldiers that have fallen far behind the formation centroid so

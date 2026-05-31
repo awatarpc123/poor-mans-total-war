@@ -26,7 +26,7 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateEngagement();
-	UpdateVolley();
+	UpdateVolley(DeltaSeconds);
 	UpdateStragglers();
 	UpdateCasualtyShock(DeltaSeconds);
 	UpdateVisualization();
@@ -1436,9 +1436,19 @@ void ABattleSpawnerActor::ClearFaceTarget()
 // Volley coordination
 // ═══════════════════════════════════════════════════════════════════════════════
 
-void ABattleSpawnerActor::UpdateVolley()
+void ABattleSpawnerActor::UpdateVolley(float DeltaSeconds)
 {
 	if (VolleyMode == EVolleyMode::FreeFire) return;
+
+	// RankFire: enforce a minimum gap between successive rank volleys. Without
+	// it, on the FIRST engagement every rank finishes its synchronized reload on
+	// the same frame, so the coordinator fires rank 0,1,2 on consecutive frames
+	// — looking like one big volley. The gap spaces them into a visible rolling
+	// fire. (Later volleys self-stagger via reload variance, but the gap keeps
+	// them clean too.)
+	constexpr float RankVolleyGap = 0.6f;   // seconds between rank volleys
+	if (VolleyRankTimer > 0.f)
+		VolleyRankTimer = FMath::Max(0.f, VolleyRankTimer - DeltaSeconds);
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -1499,19 +1509,24 @@ void ABattleSpawnerActor::UpdateVolley()
 	}
 	else if (VolleyMode == EVolleyMode::RankFire)
 	{
-		// Find the current rank to fire (cycle through rows)
-		for (int32 attempt = 0; attempt < MaxRows; ++attempt)
+		// Hold fire until the gap since the last rank volley has elapsed.
+		if (VolleyRankTimer <= 0.f)
 		{
-			const int32 Row = (CurrentVolleyRank + attempt) % MaxRows;
-			if (AlivePerRow[Row] == 0) continue;
-
-			if (ReadyPerRow[Row] >= FMath::CeilToInt(AlivePerRow[Row] * ReadyThreshold))
+			// Find the current rank to fire (cycle through rows)
+			for (int32 attempt = 0; attempt < MaxRows; ++attempt)
 			{
-				FireRow = Row;
-				CurrentVolleyRank = (Row + 1) % MaxRows;
-				break;
+				const int32 Row = (CurrentVolleyRank + attempt) % MaxRows;
+				if (AlivePerRow[Row] == 0) continue;
+
+				if (ReadyPerRow[Row] >= FMath::CeilToInt(AlivePerRow[Row] * ReadyThreshold))
+				{
+					FireRow = Row;
+					CurrentVolleyRank = (Row + 1) % MaxRows;
+					VolleyRankTimer   = RankVolleyGap;   // start gap before next rank
+					break;
+				}
+				break;  // only check the current rank (wait for it)
 			}
-			break;  // only check the current rank (wait for it)
 		}
 	}
 
