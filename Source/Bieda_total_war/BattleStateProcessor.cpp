@@ -80,8 +80,34 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			case EAgentState::HOLDING:
 				if (SF.StateTimer >= 2.f)
 				{
-					SF.State     = EAgentState::LOADING;
-					SF.StateTimer = 0.f;
+					// Musket already loaded (e.g. fresh unit marching into battle)
+					// → skip the long reload, go straight to aiming. FreeFire aims
+					// at once; volley modes wait for the coordinator's signal.
+					if (CF.bMusketLoaded)
+					{
+						if (CF.VolleyMode == EVolleyMode::FreeFire)
+						{
+							SF.State      = EAgentState::AIMING;
+							SF.StateTimer = 0.f;
+						}
+						else
+						{
+							CF.bVolleyReady = true;
+							if (CF.bVolleySignal)
+							{
+								SF.State         = EAgentState::AIMING;
+								SF.StateTimer    = 0.f;
+								CF.bVolleyReady  = false;
+								CF.bVolleySignal = false;
+							}
+							// else: stay HOLDING, loaded, waiting for the volley
+						}
+					}
+					else
+					{
+						SF.State     = EAgentState::LOADING;
+						SF.StateTimer = 0.f;
+					}
 				}
 				break;
 
@@ -89,6 +115,7 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				MF.Morale = FMath::Max(0.f, MF.Morale - CF.MoraleDrainLoading * DT);
 				if (SF.StateTimer >= CF.ReloadDuration)
 				{
+					CF.bMusketLoaded = true;   // reload finished — piece is charged
 					if (CF.VolleyMode == EVolleyMode::FreeFire)
 					{
 						// Militia / free fire: transition immediately
@@ -126,6 +153,7 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				{
 					// Self-fire morale drain removed — firing your own musket
 					// shouldn't break morale.  Enemy fire does that via ThreatActors.
+					CF.bMusketLoaded = false;   // shot spent → must reload now
 					SF.State     = EAgentState::LOADING;
 					SF.StateTimer = 0.f;
 				}

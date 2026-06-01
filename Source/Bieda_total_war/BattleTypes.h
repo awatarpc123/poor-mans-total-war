@@ -147,6 +147,11 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	EVolleyMode VolleyMode   = EVolleyMode::FreeFire;
 	bool bVolleyReady        = false;   // soldier finished loading, waiting for signal
 	bool bVolleySignal       = false;   // coordinator says FIRE (set by spawner Tick)
+
+	// Musket starts LOADED at spawn — a unit marches into battle with a charged
+	// piece, so its first shot skips the long reload (HOLDING → AIMING straight
+	// away). Cleared after the first shot; every later cycle reloads normally.
+	bool bMusketLoaded       = true;
 };
 
 // ── Order propagation ────────────────────────────────────────────────────────

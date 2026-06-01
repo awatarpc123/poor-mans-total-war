@@ -202,18 +202,32 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					}
 				}
 
-				// — Acquire new target: CLOSEST enemy with a clear fire lane —
+				// — Acquire new target: enemy most directly AHEAD of me ──────
+				// Pick the foe at roughly my own sideways position along the
+				// front, NOT the globally nearest — otherwise the whole tight
+				// rank dogpiles one or two poor souls. Each soldier rakes his
+				// own slice of the enemy line, so a volley sweeps the whole
+				// front. "Sideways" = projection onto the axis perpendicular to
+				// my aim (LatAxis); match smallest lateral delta, with distance
+				// only as a faint tie-break toward the nearer rank.
 				if (!CF.bHasAcquiredTarget)
 				{
-					float BestDistSq = FMath::Square(CF.FireRange);
-					int32 BestIdx    = INDEX_NONE;
+					const FVector LatAxis(-MyForwardN.Y, MyForwardN.X, 0.f);
+					const float   MyLat = FVector::DotProduct(MyPos, LatAxis);
+
+					float BestScore = FLT_MAX;
+					int32 BestIdx   = INDEX_NONE;
 					for (int32 j : EnemyCand)
 					{
-						const float d2 = (Positions[j] - MyPos).SizeSquared2D();
-						if (d2 >= BestDistSq) continue;
 						if (LaneBlocked(Positions[j])) continue;   // ally in the way
-						BestDistSq = d2;
-						BestIdx    = j;
+						const float EnemyLat = FVector::DotProduct(Positions[j], LatAxis);
+						const float Dist     = FMath::Sqrt((Positions[j] - MyPos).SizeSquared2D());
+						const float Score    = FMath::Abs(EnemyLat - MyLat) + 0.05f * Dist;
+						if (Score < BestScore)
+						{
+							BestScore = Score;
+							BestIdx   = j;
+						}
 					}
 					if (BestIdx != INDEX_NONE)
 					{

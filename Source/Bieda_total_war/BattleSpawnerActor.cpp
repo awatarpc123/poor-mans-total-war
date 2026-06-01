@@ -1446,7 +1446,7 @@ void ABattleSpawnerActor::UpdateVolley(float DeltaSeconds)
 	// — looking like one big volley. The gap spaces them into a visible rolling
 	// fire. (Later volleys self-stagger via reload variance, but the gap keeps
 	// them clean too.)
-	constexpr float RankVolleyGap = 0.6f;   // seconds between rank volleys
+	constexpr float RankVolleyGap = 1.0f;   // seconds between rank volleys
 	if (VolleyRankTimer > 0.f)
 		VolleyRankTimer = FMath::Max(0.f, VolleyRankTimer - DeltaSeconds);
 
