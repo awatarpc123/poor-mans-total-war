@@ -2,6 +2,9 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("State"), STAT_BiedaState, STATGROUP_Bieda);
 
 UBattleStateProcessor::UBattleStateProcessor()
 {
@@ -23,6 +26,7 @@ void UBattleStateProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 
 void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaState);
 	StateQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Ctx)
 	{
 		const float DT = Ctx.GetDeltaTimeSeconds();

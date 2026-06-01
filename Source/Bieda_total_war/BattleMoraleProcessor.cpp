@@ -5,6 +5,9 @@
 #include "BattleThreatActor.h"
 #include "EngineUtils.h"
 #include "BattleSpatialGrid.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("Morale"), STAT_BiedaMorale, STATGROUP_Bieda);
 
 namespace
 {
@@ -61,6 +64,7 @@ void UBattleMoraleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 
 void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaMorale);
 	// -----------------------------------------------------------------------
 	// Pass 0a: threat zones
 	// -----------------------------------------------------------------------

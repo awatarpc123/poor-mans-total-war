@@ -4,7 +4,10 @@
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
 #include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
+#include "BattleStats.h"
 #include "DrawDebugHelpers.h"
+
+DECLARE_CYCLE_STAT(TEXT("Combat"), STAT_BiedaCombat, STATGROUP_Bieda);
 
 namespace
 {
@@ -55,6 +58,7 @@ void UBattleCombatProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 
 void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaCombat);
 	UWorld* World = GetWorld();
 
 	// -------------------------------------------------------------------

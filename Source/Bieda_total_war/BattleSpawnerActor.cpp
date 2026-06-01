@@ -4,7 +4,14 @@
 #include "MassCommonFragments.h"
 #include "BattleTypes.h"
 #include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
+#include "BattleStats.h"
 #include "DrawDebugHelpers.h"
+
+DECLARE_CYCLE_STAT(TEXT("Spawner: Visualization"), STAT_BiedaVis,    STATGROUP_Bieda);
+DECLARE_CYCLE_STAT(TEXT("Spawner: Engagement"),    STAT_BiedaEngage, STATGROUP_Bieda);
+DECLARE_CYCLE_STAT(TEXT("Spawner: Volley"),        STAT_BiedaVolley, STATGROUP_Bieda);
+DECLARE_CYCLE_STAT(TEXT("Spawner: Stragglers"),    STAT_BiedaStrag,  STATGROUP_Bieda);
+DECLARE_CYCLE_STAT(TEXT("Spawner: CasualtyShock"), STAT_BiedaShock,  STATGROUP_Bieda);
 
 namespace { uint8 GNextSquadId = 0; }
 
@@ -35,6 +42,7 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 
 void ABattleSpawnerActor::UpdateStragglers()
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaStrag);
 	// A soldier is a "straggler" when they are significantly farther from
 	// their formation slot than the rest of the squad. This is invariant to
 	// formation shape (rectangle, line, square) because every soldier is
@@ -854,6 +862,7 @@ void ABattleSpawnerActor::IssueHaltOrder()
 
 void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaShock);
 	// Two coupled morale-collapse mechanisms, both emergent (no new state):
 	//   1) CASUALTY SHOCK — each death drops a local, time-decaying morale-hit
 	//      emitter where the soldier fell. Survivors nearby bleed morale by
@@ -1336,6 +1345,7 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 
 void ABattleSpawnerActor::UpdateEngagement()
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaEngage);
 	if (!EngagedTarget) return;
 
 	// Enemy wiped out → disengage
@@ -1503,6 +1513,7 @@ void ABattleSpawnerActor::ClearFaceTarget()
 
 void ABattleSpawnerActor::UpdateVolley(float DeltaSeconds)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaVolley);
 	if (VolleyMode == EVolleyMode::FreeFire) return;
 
 	// RankFire: enforce a minimum gap between successive rank volleys. Without
@@ -1678,6 +1689,7 @@ void ABattleSpawnerActor::SetupVisualization()
 
 void ABattleSpawnerActor::UpdateVisualization()
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaVis);
 	UWorld* World = GetWorld();
 	if (!World) return;
 

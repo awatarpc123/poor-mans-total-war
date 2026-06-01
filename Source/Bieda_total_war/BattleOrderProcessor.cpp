@@ -3,6 +3,9 @@
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("Order"), STAT_BiedaOrder, STATGROUP_Bieda);
 
 namespace
 {

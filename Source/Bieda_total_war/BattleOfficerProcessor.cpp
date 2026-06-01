@@ -2,6 +2,9 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("Officer"), STAT_BiedaOfficer, STATGROUP_Bieda);
 
 namespace
 {
@@ -40,6 +43,7 @@ void UBattleOfficerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManag
 
 void UBattleOfficerProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaOfficer);
 	// -----------------------------------------------------------------------
 	// Pass 1: snapshot all soldiers (position + state + squad)
 	// -----------------------------------------------------------------------

@@ -2,6 +2,9 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("NCO"), STAT_BiedaNCO, STATGROUP_Bieda);
 
 namespace
 {
@@ -46,6 +49,7 @@ void UBattleNCOProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager>&
 
 void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaNCO);
 	const float DT = Context.GetDeltaTimeSeconds();
 
 	// -------------------------------------------------------------------

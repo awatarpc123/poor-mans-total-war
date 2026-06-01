@@ -2,6 +2,9 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleStats.h"
+
+DECLARE_CYCLE_STAT(TEXT("Drummer"), STAT_BiedaDrummer, STATGROUP_Bieda);
 
 UBattleDrummerProcessor::UBattleDrummerProcessor()
 {
@@ -23,6 +26,7 @@ void UBattleDrummerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManag
 
 void UBattleDrummerProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	SCOPE_CYCLE_COUNTER(STAT_BiedaDrummer);
 	const float DT = Context.GetDeltaTimeSeconds();
 
 	DrummerQuery.ForEachEntityChunk(Context, [DT](FMassExecutionContext& Ctx)
