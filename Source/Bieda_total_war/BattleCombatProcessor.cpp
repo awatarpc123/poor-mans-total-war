@@ -49,7 +49,6 @@ void UBattleCombatProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 	CombatQuery.AddRequirement<FAgentStateFragment>(EMassFragmentAccess::ReadOnly);
 	CombatQuery.AddRequirement<FAgentCombatFragment>(EMassFragmentAccess::ReadWrite);
 	CombatQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
-	CombatQuery.AddRequirement<FAgentVelocityFragment>(EMassFragmentAccess::ReadOnly);   // UnitType (militia gate)
 	CombatQuery.RegisterWithProcessor(*this);
 }
 
@@ -106,7 +105,6 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
 		auto       Combats    = Ctx.GetMutableFragmentView<FAgentCombatFragment>();
 		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
-		const auto Velocities = Ctx.GetFragmentView<FAgentVelocityFragment>();
 
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i, ++GlobalIdx)
 		{
@@ -116,12 +114,15 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			const FVector MyPos       = Positions[GlobalIdx];
 			const FVector MyForward   = Forwards[GlobalIdx];
 
-			// Friendly line-of-fire blocking applies to MILITIA only. Line
-			// infantry fights by volley (SquadVolley/RankFire): both ranks fire
-			// together on command, so a rear-rank man firing "through" the front
-			// rank is the intended thin-red-line behaviour, not friendly fire.
-			// The volley coordinator (UpdateVolley) gates their timing instead.
-			const bool bUseLaneCheck = (Velocities[i].UnitType == EUnitType::Militia);
+			// Friendly line-of-fire blocking is gated by FIRE MODE, not unit type:
+			//   FreeFire  → ON  — each man fires on his own initiative, so only
+			//                     those with a clear lane to an enemy may shoot.
+			//                     A rear-rank soldier won't fire "through" 19 mates.
+			//   Volley    → OFF — the whole rank/company fires together on command;
+			//                     rear ranks firing past the front is the intended
+			//                     thin-red-line behaviour. UpdateVolley gates timing.
+			// Militia is always FreeFire → always lane-checked, as before.
+			const bool bUseLaneCheck = (CF.VolleyMode == EVolleyMode::FreeFire);
 
 			// ── AIMING: acquire / validate target ──────────────────────────
 			if (MyState == EAgentState::AIMING)
