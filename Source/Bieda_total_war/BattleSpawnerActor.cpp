@@ -465,10 +465,26 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		CurrentRowSize = LocalRowSize;
 	}
 
-	const FFormationDims Dims = ComputeFormationDims(LocalRowSize);
-	const int32 NumRows   = Dims.Rows;
-	const float HalfFront = Dims.HalfFront;
-	const float HalfDepth = Dims.HalfDepth;
+	// ── Gather only the LIVING soldiers ───────────────────────────────────────
+	// Slots must match the number of men still alive — dead bodies don't hold a
+	// place in the formation. Otherwise re-forming (e.g. 2 ranks → 3) leaves gaps
+	// where casualties used to be. (Total War–style: ranks close up over losses.)
+	TArray<FMassEntityHandle> LiveSoldiers;
+	LiveSoldiers.Reserve(SpawnedEntities.Num());
+	for (const FMassEntityHandle& E : SpawnedEntities)
+	{
+		if (!EM.IsEntityValid(E)) continue;
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+		if (SF.State == EAgentState::DEAD) continue;
+		LiveSoldiers.Add(E);
+	}
+	const int32 LiveCount = LiveSoldiers.Num();
+
+	// Formation geometry sized to the LIVING count, not the original roster.
+	const int32 LiveRows  = FMath::Max(1, FMath::CeilToInt((float)LiveCount / LocalRowSize));
+	const int32 NumRows   = LiveRows;
+	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
+	const float HalfDepth = LiveRows     * SpawnSpacing * 0.5f;
 
 	// ── Determine front-line direction ────────────────────────────────────────
 	// FrontLineDir = direction soldiers spread along (left-to-right of formation)
@@ -493,15 +509,13 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 	// Build rotation: X = front line direction, Y = depth direction
 	const FQuat FormRot = FRotationMatrix::MakeFromX(FrontLineDir).ToQuat();
 
-	// ── Assign each soldier a formation slot ──────────────────────────────────
-	const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
-	for (int32 i = 0; i < SoldierCount; ++i)
+	// ── Assign each LIVING soldier a formation slot (k = packed live index) ───
+	for (int32 k = 0; k < LiveCount; ++k)
 	{
-		const FMassEntityHandle Entity = SpawnedEntities[i];
-		if (!EM.IsEntityValid(Entity)) continue;
+		const FMassEntityHandle Entity = LiveSoldiers[k];
 
-		const int32 Col = i % LocalRowSize;
-		const int32 Row = i / LocalRowSize;
+		const int32 Col = k % LocalRowSize;
+		const int32 Row = k / LocalRowSize;
 
 		// Col = position along front line (X of rotation)
 		// Row = depth, front row (Row=0) at +Y, back rows toward -Y
@@ -1190,24 +1204,33 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 		: FMath::Max(3, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
 	CurrentRowSize = LocalRowSize;
 
-	const FFormationDims Dims = ComputeFormationDims(LocalRowSize);
-	const int32 NumRows   = Dims.Rows;
-	const float HalfFront = Dims.HalfFront;
-	const float HalfDepth = Dims.HalfDepth;
+	// ── Gather only the LIVING soldiers (ranks close up over casualties) ──────
+	TArray<FMassEntityHandle> LiveSoldiers;
+	LiveSoldiers.Reserve(SpawnedEntities.Num());
+	for (const FMassEntityHandle& E : SpawnedEntities)
+	{
+		if (!EM.IsEntityValid(E)) continue;
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+		if (SF.State == EAgentState::DEAD) continue;
+		LiveSoldiers.Add(E);
+	}
+	const int32 LiveCount = LiveSoldiers.Num();
+
+	const int32 NumRows   = FMath::Max(1, FMath::CeilToInt((float)LiveCount / LocalRowSize));
+	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
+	const float HalfDepth = NumRows      * SpawnSpacing * 0.5f;
 
 	// Front line perpendicular to march direction (toward enemy)
 	const FVector FrontLineDir = FVector(ToEnemy.Y, -ToEnemy.X, 0.f);
 	const FQuat   FormRot      = FRotationMatrix::MakeFromX(FrontLineDir).ToQuat();
 
-	// ── Assign soldiers ───────────────────────────────────────────────────────
-	const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
-	for (int32 i = 0; i < SoldierCount; ++i)
+	// ── Assign each LIVING soldier a slot (k = packed live index) ─────────────
+	for (int32 k = 0; k < LiveCount; ++k)
 	{
-		const FMassEntityHandle Entity = SpawnedEntities[i];
-		if (!EM.IsEntityValid(Entity)) continue;
+		const FMassEntityHandle Entity = LiveSoldiers[k];
 
-		const int32 Col = i % LocalRowSize;
-		const int32 Row = i / LocalRowSize;
+		const int32 Col = k % LocalRowSize;
+		const int32 Row = k / LocalRowSize;
 		const FVector LocalOffset(
 			Col * SpawnSpacing - HalfFront,
 			HalfDepth - Row * SpawnSpacing,
