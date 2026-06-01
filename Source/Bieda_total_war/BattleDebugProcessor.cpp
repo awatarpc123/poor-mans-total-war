@@ -6,6 +6,24 @@
 #include "DrawDebugHelpers.h"
 #include "EngineUtils.h"
 
+// Master switch for ALL battle debug rendering (capsules, morale bars, velocity
+// arrows, rings, threat spheres). This is the single biggest editor-time cost at
+// high agent counts: thousands of DrawDebug calls per frame. Toggle at runtime
+// from the console:  bieda.Debug 0  (off) / bieda.Debug 1 (on). Default OFF so
+// builds and perf tests run clean; flip to 1 when you want the diagnostic view.
+static TAutoConsoleVariable<int32> CVarBiedaDebug(
+	TEXT("bieda.Debug"),
+	0,
+	TEXT("Draw Bieda battle debug shapes (0=off, 1=on). Costs a lot at 1000+ agents."),
+	ECVF_Default);
+
+// Shared accessor (declared in the header) so every DrawDebug site across the
+// module can gate on the same switch.
+bool BiedaDebugDrawEnabled()
+{
+	return CVarBiedaDebug.GetValueOnGameThread() != 0;
+}
+
 UBattleDebugProcessor::UBattleDebugProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
@@ -59,6 +77,9 @@ static FColor AgentColor(EAgentState State)
 
 void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	// Skip the whole pass when debug drawing is off — no per-agent work at all.
+	if (!BiedaDebugDrawEnabled()) return;
+
 	UWorld* World = GetWorld();
 	if (!World) return;
 

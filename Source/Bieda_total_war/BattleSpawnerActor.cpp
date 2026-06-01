@@ -3,6 +3,7 @@
 #include "MassEntityManager.h"
 #include "MassCommonFragments.h"
 #include "BattleTypes.h"
+#include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
 #include "DrawDebugHelpers.h"
 
 namespace { uint8 GNextSquadId = 0; }
@@ -1814,8 +1815,8 @@ void ABattleSpawnerActor::UpdateVisualization()
 		}
 	}
 
-	// ── Fire range arc + facing arrow ─────────────────────────────────────
-	if (bShowFireRange)
+	// ── Fire range arc + facing arrow (debug only) ───────────────────────
+	if (bShowFireRange && BiedaDebugDrawEnabled())
 	{
 		DrawFireRangeArc(EM);
 	}

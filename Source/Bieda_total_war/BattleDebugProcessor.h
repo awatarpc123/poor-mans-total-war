@@ -6,6 +6,11 @@
 #include "MassEntityManager.h"
 #include "BattleDebugProcessor.generated.h"
 
+/** Is battle debug drawing currently enabled? Backed by the `bieda.Debug`
+ *  console variable (0=off default, 1=on). Used by every system that issues
+ *  DrawDebug* calls so they can be silenced together for perf/builds. */
+BIEDA_TOTAL_WAR_API bool BiedaDebugDrawEnabled();
+
 UCLASS()
 class BIEDA_TOTAL_WAR_API UBattleDebugProcessor : public UMassProcessor
 {

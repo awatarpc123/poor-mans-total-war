@@ -3,6 +3,7 @@
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
+#include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
 #include "DrawDebugHelpers.h"
 
 namespace
@@ -248,7 +249,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 						T.SetRotation(FRotationMatrix::MakeFromX(ToTarget).ToQuat());
 						Transforms[i].GetMutableTransform() = T;
 					}
-					if (World)
+					if (World && BiedaDebugDrawEnabled())
 					{
 						DrawDebugLine(World,
 							MyPos + FVector(0.f, 0.f, 75.f),
@@ -308,7 +309,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		}
 
 		// Debug line: red = hit, yellow = miss.  Persists 0.3 s.
-		if (World)
+		if (World && BiedaDebugDrawEnabled())
 		{
 			const FVector Start = Evt.ShooterPos + FVector(0.f, 0.f, 75.f);
 			const FVector End   = Evt.TargetPos  + FVector(0.f, 0.f, 75.f);
