@@ -59,7 +59,10 @@ private:
 	UPROPERTY()
 	TObjectPtr<ABattleSpawnerActor> SelectedSpawner;
 
-	float SelectionRadius = 1500.f;
+	// Max distance from the click to a squad's NEAREST soldier to select it.
+	// Measured to the closest man (not the formation centre), so it stays small —
+	// a click just has to land near someone in the unit, on any flank.
+	float SelectionRadius = 400.f;
 
 	// ── Drag-to-form state ───────────────────────────────────────────────────
 	bool    bLMBHeld      = false;

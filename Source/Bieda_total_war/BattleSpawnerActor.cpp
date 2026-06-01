@@ -993,6 +993,33 @@ FVector ABattleSpawnerActor::GetFormationCenter() const
 	return (Count > 0) ? (Sum / static_cast<float>(Count)) : GetActorLocation();
 }
 
+float ABattleSpawnerActor::GetClosestSoldierDistSq(const FVector& WorldPos) const
+{
+	UWorld* World = GetWorld();
+	if (!World) return FLT_MAX;
+
+	const UMassEntitySubsystem* Subsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (!Subsystem) return FLT_MAX;
+
+	const FMassEntityManager& EM = Subsystem->GetEntityManager();
+
+	float Best = FLT_MAX;
+	const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
+	for (int32 i = 0; i < SoldierCount; ++i)
+	{
+		const FMassEntityHandle Entity = SpawnedEntities[i];
+		if (!EM.IsEntityValid(Entity)) continue;
+
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
+		if (SF.State == EAgentState::DEAD) continue;
+
+		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
+		const float DistSq = (TF.GetTransform().GetLocation() - WorldPos).SizeSquared2D();
+		if (DistSq < Best) Best = DistSq;
+	}
+	return Best;
+}
+
 bool ABattleSpawnerActor::HasAliveSoldiers() const
 {
 	UWorld* World = GetWorld();

@@ -354,7 +354,7 @@ void ABattleCameraPawn::OnLMBDown(const FInputActionValue& Value)
 		bool bClickedOnUnit = false;
 		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
 		{
-			const float DistSq = (It->GetFormationCenter() - DragStartPos).SizeSquared2D();
+			const float DistSq = It->GetClosestSoldierDistSq(DragStartPos);
 			if (DistSq < FMath::Square(SelectionRadius))
 			{
 				bClickedOnUnit = true;
@@ -407,7 +407,10 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 	FVector ClickPos;
 	if (!GetGroundHitUnderCursor(ClickPos)) return;
 
-	// Try to select a formation
+	// Try to select a formation — pick the squad whose NEAREST soldier is
+	// closest to the click, within SelectionRadius. (Distance-to-centre failed
+	// on wide/deep formations: a click on a flank could be thousands of cm from
+	// the centre even while standing on a man.)
 	ABattleSpawnerActor* BestSpawner = nullptr;
 	float BestDistSq = FMath::Square(SelectionRadius);
 
@@ -415,8 +418,7 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 	{
 		if (It->TeamId != 0) continue;
 
-		const FVector Center = It->GetFormationCenter();
-		const float DistSq = (Center - ClickPos).SizeSquared2D();
+		const float DistSq = It->GetClosestSoldierDistSq(ClickPos);
 		if (DistSq < BestDistSq)
 		{
 			BestDistSq  = DistSq;
@@ -444,8 +446,7 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 		{
 			if (It->TeamId == 0) continue;   // skip friendly
 
-			const FVector EnemyCenter = It->GetFormationCenter();
-			const float DistSq = (EnemyCenter - ClickPos).SizeSquared2D();
+			const float DistSq = It->GetClosestSoldierDistSq(ClickPos);
 			if (DistSq < BestEnemyDistSq)
 			{
 				BestEnemyDistSq = DistSq;

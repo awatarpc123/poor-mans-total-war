@@ -217,6 +217,11 @@ public:
 	/** Average world position of all living soldiers (used for selection). */
 	FVector GetFormationCenter() const;
 
+	/** Squared 2D distance from WorldPos to the NEAREST living soldier of this
+	 *  squad (FLT_MAX if none alive). Used for click-selection so a wide/deep
+	 *  formation is picked by clicking on any of its men, not just its centre. */
+	float GetClosestSoldierDistSq(const FVector& WorldPos) const;
+
 	/** Are there any alive soldiers? (used by engagement system). */
 	bool HasAliveSoldiers() const;
 
