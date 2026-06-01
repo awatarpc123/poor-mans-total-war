@@ -882,6 +882,19 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 		InitialSoldierCount = FMath::Max(1, GetAliveCount());
 	}
 
+	// Strength of a fresh death's shock scales with how chewed-up the squad
+	// already is (loss ratio BEFORE this frame's deaths). A death in a near-full
+	// company barely registers; a death in a bled-white remnant is terrifying —
+	// so the unit grows more panic-prone the smaller it gets. Scale-independent:
+	// works the same for 25, 50 or 150 men because it's a ratio. Floor 0.15 so a
+	// death is never literally free.
+	int32 AliveBefore = 0;
+	for (int32 i = 0; i < Count; ++i)
+		if (SoldierWasAlive[i]) ++AliveBefore;
+	const float LossBefore = 1.f - (static_cast<float>(AliveBefore) /
+		static_cast<float>(InitialSoldierCount));
+	const float ShockLossScale = 0.15f + 0.85f * FMath::Clamp(LossBefore, 0.f, 1.f);
+
 	// ── Pass 1: detect new deaths → spawn shock sources; count alive ────────
 	int32 AliveNow = 0;
 	for (int32 i = 0; i < Count; ++i)
@@ -906,10 +919,11 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 			}
 		}
 
-		// Transition alive→dead this frame = a fresh casualty → emit shock.
+		// Transition alive→dead this frame = a fresh casualty → emit shock,
+		// scaled by how depleted the squad already was.
 		if (SoldierWasAlive[i] && !bAlive)
 		{
-			ShockSources.Add({ Pos, ShockPerDeath });
+			ShockSources.Add({ Pos, ShockPerDeath * ShockLossScale });
 		}
 		SoldierWasAlive[i] = bAlive;
 	}

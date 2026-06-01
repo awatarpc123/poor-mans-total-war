@@ -32,9 +32,16 @@ private:
 	FMassEntityQuery OfficerQuery;   // read officer aura data
 
 	// Radii (cm)
-	static constexpr float RoutingRadius = 1500.f;
+	static constexpr float RoutingRadius = 1000.f;   // panic contagion reach (was 1500 — 15m was too far)
 	static constexpr float DeadRadius    =  500.f;
 	static constexpr float StableRadius  = 1000.f;
+
+	// Panic contagion critical mass (fraction of the squad already breaking).
+	// Below ContagionFloor, fear doesn't spread at all (lone panicker is steadied
+	// by his mates); it ramps to full strength by ContagionFull. Fraction-based,
+	// so identical behaviour at any squad size.
+	static constexpr float ContagionFloor = 0.15f;   // <15% breaking → no spread
+	static constexpr float ContagionFull  = 0.40f;   // ≥40% breaking → full spread
 
 	// Per-neighbor rates (/s) — Routing/Shaken now distance-weighted (see .cpp)
 	static constexpr float RoutingDrainRate = 3.f;

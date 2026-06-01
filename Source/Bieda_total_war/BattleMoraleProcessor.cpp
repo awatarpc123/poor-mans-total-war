@@ -12,6 +12,7 @@ namespace
 	{
 		EAgentState State;
 		uint8       TeamId;
+		uint8       SquadId;
 	};
 
 	struct FMoraleOfficerSnap
@@ -112,7 +113,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		for (int32 i = 0; i < N; ++i)
 		{
 			Positions.Add(Transforms[i].GetTransform().GetLocation());
-			Snaps.Add({ States[i].State, Factions[i].TeamId });
+			Snaps.Add({ States[i].State, Factions[i].TeamId, Factions[i].SquadId });
 		}
 	});
 
@@ -122,6 +123,34 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	Grid.Build(Positions, RoutingRadius);
 
 	const float DT = Context.GetDeltaTimeSeconds();
+
+	// -----------------------------------------------------------------------
+	// Pass 1b: panic contagion needs CRITICAL MASS. Count, per squad, the
+	// fraction of living men already breaking (SHAKEN/ROUTING/RALLYING). One
+	// panicker among many steadies under peer pressure and won't cascade; only
+	// once a real share of the squad is wavering does fear start to spread.
+	// Scale-independent (it's a fraction → same for 25, 50 or 150 men).
+	// -----------------------------------------------------------------------
+	TMap<uint8, int32> SquadAlive;
+	TMap<uint8, int32> SquadBreaking;
+	for (const FAgentSnap& S : Snaps)
+	{
+		if (S.State == EAgentState::DEAD) continue;
+		SquadAlive.FindOrAdd(S.SquadId)++;
+		if (S.State == EAgentState::ROUTING ||
+			S.State == EAgentState::RALLYING ||
+			S.State == EAgentState::SHAKEN)
+			SquadBreaking.FindOrAdd(S.SquadId)++;
+	}
+	// Per-squad contagion gain: 0 until the breaking fraction reaches the
+	// threshold, ramping to full as it climbs further.
+	auto ContagionGain = [&](uint8 SquadId) -> float
+	{
+		const int32 Alive = SquadAlive.FindRef(SquadId);
+		if (Alive <= 0) return 1.f;
+		const float Frac = static_cast<float>(SquadBreaking.FindRef(SquadId)) / Alive;
+		return FMath::Clamp((Frac - ContagionFloor) / (ContagionFull - ContagionFloor), 0.f, 1.f);
+	};
 
 	// -----------------------------------------------------------------------
 	// Pass 2: apply morale effects
@@ -209,7 +238,13 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			ShakenDrain  = FMath::Min(ShakenDrain,  MaxShakenDrain);
 			StableBonus  = FMath::Min(StableBonus,  MaxStableBonus);
 
-			Morale -= (RoutingDrain + DeadDrain + ShakenDrain) * DT;
+			// Gate panic contagion (routing/shaken neighbours) by the squad's
+			// critical mass: a lone breaker among steady men spreads nothing.
+			// Corpse shock (DeadDrain) and cohesion bonus are NOT gated — those
+			// are direct, not contagion.
+			const float Contagion = ContagionGain(MySquad);
+			Morale -= (RoutingDrain + ShakenDrain) * Contagion * DT;
+			Morale -= DeadDrain * DT;
 			Morale += StableBonus * DT;
 
 			// ── Officer effects — by SquadId (own officer only) ───────────
