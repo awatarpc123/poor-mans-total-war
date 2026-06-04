@@ -94,6 +94,15 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 	if (Snaps.IsEmpty()) return;
 
+	// PERF: handle → snapshot-index map for O(1) target lookup. The validation
+	// (AIMING) and target-position (FIRING) paths used to scan the whole Handles
+	// array linearly — O(n) per soldier = O(n^2) per frame (~millions of compares
+	// at 2000 agents). One map build is O(n); each lookup is O(1).
+	TMap<FMassEntityHandle, int32> HandleToIdx;
+	HandleToIdx.Reserve(Handles.Num());
+	for (int32 h = 0; h < Handles.Num(); ++h)
+		HandleToIdx.Add(Handles[h], h);
+
 	// Spatial grid — cell size ~half fire range for efficient lookups
 	FBattleSpatialGrid Grid;
 	Grid.Build(Positions, 2500.f);
@@ -181,12 +190,12 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					return false;
 				};
 
-				// — Locate current target in snapshot —
+				// — Locate current target in snapshot (O(1) map lookup) —
 				int32 TargetSnapIdx = INDEX_NONE;
 				if (CF.bHasAcquiredTarget)
 				{
-					for (int32 h = 0; h < Handles.Num(); ++h)
-						if (Handles[h] == CF.TargetEntity) { TargetSnapIdx = h; break; }
+					if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
+						TargetSnapIdx = *Found;
 				}
 
 				// — Validate existing target: alive, in range, lane clear —
@@ -265,16 +274,10 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			// ── FIRING: roll accuracy, queue damage ────────────────────────
 			else if (MyState == EAgentState::FIRING && CF.bHasAcquiredTarget)
 			{
-				// Find target position for debug line
+				// Target position for the shot/debug line (O(1) map lookup)
 				FVector TargetPos = MyPos + MyForward * CF.FireRange;
-				for (int32 h = 0; h < Handles.Num(); ++h)
-				{
-					if (Handles[h] == CF.TargetEntity)
-					{
-						TargetPos = Positions[h];
-						break;
-					}
-				}
+				if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
+					TargetPos = Positions[*Found];
 
 				const bool bHit = FMath::FRand() < CF.Accuracy;
 				DamageEvents.Add({ CF.TargetEntity, MyPos, TargetPos, bHit });
