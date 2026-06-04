@@ -225,6 +225,15 @@ public:
 	/** Are there any alive soldiers? (used by engagement system). */
 	bool HasAliveSoldiers() const;
 
+	/** Count living soldiers (DEAD excluded). RALLYING/ROUTING still count as
+	 *  present unless they've deserted off the battlefield. */
+	int32 CountLiving() const { return GetAliveCount(); }
+
+	/** Kill (mark DEAD = remove from the fight) every ROUTING soldier whose 2D
+	 *  distance from BattlefieldCentre exceeds Radius — they've fled the field
+	 *  and desert. Returns how many deserted this call. Used by BattleManager. */
+	int32 PurgeDesertersOutside(const FVector& BattlefieldCentre, float Radius);
+
 	/** Currently engaged enemy (nullptr = none). */
 	ABattleSpawnerActor* GetEngagedTarget() const { return EngagedTarget; }
 

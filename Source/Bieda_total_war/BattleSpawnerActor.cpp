@@ -1095,6 +1095,38 @@ int32 ABattleSpawnerActor::GetAliveCount() const
 	return Count;
 }
 
+int32 ABattleSpawnerActor::PurgeDesertersOutside(const FVector& BattlefieldCentre, float Radius)
+{
+	UWorld* World = GetWorld();
+	if (!World) return 0;
+
+	UMassEntitySubsystem* Subsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (!Subsystem) return 0;
+
+	FMassEntityManager& EM = Subsystem->GetMutableEntityManager();
+	const float RadiusSq = Radius * Radius;
+	int32 Deserted = 0;
+
+	for (const FMassEntityHandle& Entity : SpawnedEntities)
+	{
+		if (!EM.IsEntityValid(Entity)) continue;
+		FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
+		if (SF.State != EAgentState::ROUTING) continue;   // only routers desert
+
+		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
+		const float DistSq = (TF.GetTransform().GetLocation() - BattlefieldCentre).SizeSquared2D();
+		if (DistSq > RadiusSq)
+		{
+			// Fled the field — gone for good. Mark DEAD so every system
+			// (counts, visualization, victory check) treats him as removed.
+			SF.State      = EAgentState::DEAD;
+			SF.StateTimer = 0.f;
+			++Deserted;
+		}
+	}
+	return Deserted;
+}
+
 float ABattleSpawnerActor::GetAverageMorale() const
 {
 	UWorld* World = GetWorld();

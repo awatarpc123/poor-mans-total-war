@@ -12,4 +12,6 @@ class BIEDA_TOTAL_WAR_API ABattleGameMode : public AGameModeBase
 
 public:
 	ABattleGameMode();
+
+	virtual void BeginPlay() override;
 };

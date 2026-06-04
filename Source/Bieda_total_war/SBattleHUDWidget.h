@@ -13,6 +13,7 @@
 #include "EngineUtils.h"
 #include "BattleSpawnerActor.h"
 #include "BattleCameraPawn.h"
+#include "BattleManager.h"
 #include "GameFramework/PlayerController.h"
 
 /**
@@ -42,6 +43,11 @@ public:
 
 		ChildSlot
 		[
+			SNew(SOverlay)
+
+			// ══ Layer 1: normal HUD (unit panel + cards) ════════════════════
+			+ SOverlay::Slot()
+			[
 			SNew(SVerticalBox)
 
 			// Spacer pushes everything to bottom
@@ -216,6 +222,26 @@ public:
 				// Right spacer
 				+ SHorizontalBox::Slot().FillWidth(0.05f)
 			]
+			]   // end Layer 1 (normal HUD)
+
+			// ══ Layer 2: end-of-battle banner (centred, only when decided) ══
+			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.85f))
+				.Padding(FMargin(60.f, 30.f))
+				.Visibility_Lambda([this]() {
+					return GetOutcomeText().IsEmpty() ? EVisibility::Collapsed
+					                                  : EVisibility::HitTestInvisible;
+				})
+				[
+					SNew(STextBlock)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 48))
+					.Justification(ETextJustify::Center)
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor { return GetOutcomeColor(); })
+					.Text_Lambda([this]() -> FText { return FText::FromString(GetOutcomeText()); })
+				]
+			]
 		];
 	}
 
@@ -255,6 +281,36 @@ private:
 	{
 		ABattleCameraPawn* Cam = GetCameraPawn();
 		return Cam ? Cam->GetSelectedSpawner() : nullptr;
+	}
+
+	// ── End-of-battle banner ──────────────────────────────────────────────
+	EBattleOutcome GetOutcome() const
+	{
+		if (!World) return EBattleOutcome::Ongoing;
+		for (TActorIterator<ABattleManager> It(World); It; ++It)
+			return It->GetOutcome();
+		return EBattleOutcome::Ongoing;
+	}
+
+	FString GetOutcomeText() const
+	{
+		switch (GetOutcome())
+		{
+		case EBattleOutcome::PlayerVictory: return TEXT("ZWYCIĘSTWO");
+		case EBattleOutcome::PlayerDefeat:  return TEXT("PORAŻKA");
+		case EBattleOutcome::Draw:          return TEXT("REMIS");
+		default:                            return FString();   // empty = hide banner
+		}
+	}
+
+	FSlateColor GetOutcomeColor() const
+	{
+		switch (GetOutcome())
+		{
+		case EBattleOutcome::PlayerVictory: return FSlateColor(FLinearColor(0.3f, 1.f, 0.3f));
+		case EBattleOutcome::PlayerDefeat:  return FSlateColor(FLinearColor(1.f, 0.25f, 0.25f));
+		default:                            return FSlateColor(FLinearColor(0.85f, 0.85f, 0.5f));
+		}
 	}
 
 	FString GetUnitName() const
