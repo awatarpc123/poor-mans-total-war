@@ -219,38 +219,56 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					}
 				}
 
-				// — Acquire new target: enemy most directly AHEAD of me ──────
-				// Pick the foe at roughly my own sideways position along the
-				// front, NOT the globally nearest — otherwise the whole tight
-				// rank dogpiles one or two poor souls. Each soldier rakes his
-				// own slice of the enemy line, so a volley sweeps the whole
-				// front. "Sideways" = projection onto the axis perpendicular to
-				// my aim (LatAxis); match smallest lateral delta, with distance
-				// only as a faint tie-break toward the nearer rank.
+				// — Acquire new target: spread fire toward the enemy ─────────
+				// Score each foe by how far off my aim line he sits (lateral
+				// delta from my own position along the front), plus a faint
+				// distance bias. Then, instead of always taking the single best
+				// (which makes a WIDE firing line dogpile one or two men when the
+				// target is NARROW — a militia blob), pick RANDOMLY among the few
+				// best-scoring candidates. The shots stay aimed at the enemy but
+				// scatter across whoever's there, so a thin target gets peppered
+				// all over instead of two poor souls turned into sieves.
 				if (!CF.bHasAcquiredTarget)
 				{
 					const FVector LatAxis(-MyForwardN.Y, MyForwardN.X, 0.f);
 					const float   MyLat = FVector::DotProduct(MyPos, LatAxis);
 
-					float BestScore = FLT_MAX;
-					int32 BestIdx   = INDEX_NONE;
+					// Keep the K best (lowest-score) candidates.
+					constexpr int32 K = 5;
+					int32 BestIdx[K];
+					float BestScore[K];
+					int32 Found = 0;
+					for (int32 c = 0; c < K; ++c) { BestIdx[c] = INDEX_NONE; BestScore[c] = FLT_MAX; }
+
 					for (int32 j : EnemyCand)
 					{
 						if (LaneBlocked(Positions[j])) continue;   // ally in the way
 						const float EnemyLat = FVector::DotProduct(Positions[j], LatAxis);
 						const float Dist     = FMath::Sqrt((Positions[j] - MyPos).SizeSquared2D());
 						const float Score    = FMath::Abs(EnemyLat - MyLat) + 0.05f * Dist;
-						if (Score < BestScore)
+
+						// Insertion into the small sorted top-K buffer.
+						if (Score < BestScore[K - 1])
 						{
-							BestScore = Score;
-							BestIdx   = j;
+							int32 p = K - 1;
+							while (p > 0 && Score < BestScore[p - 1])
+							{
+								BestScore[p] = BestScore[p - 1];
+								BestIdx[p]   = BestIdx[p - 1];
+								--p;
+							}
+							BestScore[p] = Score;
+							BestIdx[p]   = j;
+							Found = FMath::Min(Found + 1, K);
 						}
 					}
-					if (BestIdx != INDEX_NONE)
+
+					if (Found > 0)
 					{
-						CF.TargetEntity       = Handles[BestIdx];
+						const int32 Pick = BestIdx[FMath::RandRange(0, Found - 1)];
+						CF.TargetEntity       = Handles[Pick];
 						CF.bHasAcquiredTarget = true;
-						TargetSnapIdx         = BestIdx;
+						TargetSnapIdx         = Pick;
 					}
 				}
 
