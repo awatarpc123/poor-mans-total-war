@@ -54,6 +54,12 @@ void UBattleDebugProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 	NCODebugQuery.AddRequirement<FNCOFragment>(EMassFragmentAccess::ReadOnly);
 	NCODebugQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
 	NCODebugQuery.RegisterWithProcessor(*this);
+
+	DrummerDebugQuery.Initialize(EntityManager);
+	DrummerDebugQuery.AddRequirement<FTransformFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerDebugQuery.AddRequirement<FDrummerFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerDebugQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
+	DrummerDebugQuery.RegisterWithProcessor(*this);
 }
 
 static FColor AgentColor(EAgentState State)
@@ -198,6 +204,23 @@ void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 					50.f, 12, FColor(200, 120, 0), false, -1.f, 0, 2.5f,
 					FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
 			}
+		}
+	});
+
+	// ── Drummers / fifers (musicians beside the officer) — PURPLE capsule ────
+	DrummerDebugQuery.ForEachEntityChunk(Context, [World](FMassExecutionContext& Ctx)
+	{
+		const auto Transforms  = Ctx.GetFragmentView<FTransformFragment>();
+		const auto DrummerData = Ctx.GetFragmentView<FDrummerFragment>();
+
+		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i)
+		{
+			if (!DrummerData[i].bIsAlive) continue;
+
+			const FVector Pos = Transforms[i].GetTransform().GetLocation();
+			// Purple capsule (~175cm) — identifies the musicians at a glance.
+			DrawDebugCapsule(World, Pos + FVector(0.f, 0.f, 87.f), 87.f, 25.f,
+				FQuat::Identity, FColor(160, 32, 240), false, -1.f, 0, 2.5f);
 		}
 	});
 

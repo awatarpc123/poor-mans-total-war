@@ -273,6 +273,10 @@ private:
 	};
 	FFormationDims ComputeFormationDims(int32 InRowSize) const;
 
+	/** Side-to-side spacing between men in the SAME rank — half the rank-to-rank
+	 *  spacing (men stand shoulder-to-shoulder, ranks are spaced wider). */
+	float ColSpacing() const { return SpawnSpacing * 0.5f; }
+
 	// ── Casualty shock + morale collapse ─────────────────────────────────────
 	// A transient morale-hit emitter dropped at the spot where a soldier died.
 	// Soldiers near it bleed morale (distance falloff); the source fades over

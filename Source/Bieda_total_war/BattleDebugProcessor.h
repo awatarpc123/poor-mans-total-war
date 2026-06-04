@@ -27,4 +27,5 @@ private:
 	FMassEntityQuery DebugQuery;
 	FMassEntityQuery OfficerDebugQuery;
 	FMassEntityQuery NCODebugQuery;
+	FMassEntityQuery DrummerDebugQuery;
 };

@@ -118,10 +118,13 @@ void ABattleSpawnerActor::UpdateStragglers()
 
 ABattleSpawnerActor::FFormationDims ABattleSpawnerActor::ComputeFormationDims(int32 InRowSize) const
 {
+	// Men in a rank stand shoulder-to-shoulder — tighter side-to-side than the
+	// gap between ranks. ColSpacing (within a row) is half SpawnSpacing; rank
+	// depth keeps the full SpawnSpacing.
 	FFormationDims D;
 	D.Cols      = FMath::Max(1, InRowSize);
 	D.Rows      = FMath::Max(1, FMath::CeilToInt((float)NumAgents / D.Cols));
-	D.HalfFront = D.Cols * SpawnSpacing * 0.5f;
+	D.HalfFront = D.Cols * ColSpacing() * 0.5f;
 	D.HalfDepth = D.Rows * SpawnSpacing * 0.5f;
 	return D;
 }
@@ -205,7 +208,7 @@ void ABattleSpawnerActor::SpawnAgents()
 		const int32 Row = i / EffectiveRowSize;
 		const int32 Col = i % EffectiveRowSize;
 		const FVector SpawnPos = Base
-			+ FVector(Col * SpawnSpacing - HalfFront, Row * SpawnSpacing - HalfDepth, 0.f);
+			+ FVector(Col * ColSpacing() - HalfFront, Row * SpawnSpacing - HalfDepth, 0.f);
 
 		FMassEntityHandle Entity = EM.CreateEntity(Archetype);
 
@@ -404,11 +407,13 @@ void ABattleSpawnerActor::SpawnAgents()
 		{
 			FMassEntityHandle DrummerEntity = EM.CreateEntity(DrummerArchetype);
 
-			// Spread drummers across the rear, between the line and the NCOs
-			const float LateralOffset = (NumDrummers > 1)
-				? (static_cast<float>(d) / (NumDrummers - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
-				: 0.f;
-			const FVector DrummerLocalPos(LateralOffset, -(HalfDepth + SpawnSpacing * 0.4f), 0.f);
+			// Musicians (drummer + fifer) stand BESIDE the officer at the front
+			// of the column, just off to one side, and follow him. Officer sits at
+			// (0, +HalfDepth+100); place musicians at the same depth, fanned out
+			// to the flank so they don't overlap him.
+			const float SideStep = 150.f;   // cm out to the side per musician
+			const float LateralOffset = (static_cast<float>(d) + 1.f) * SideStep;
+			const FVector DrummerLocalPos(LateralOffset, HalfDepth + 100.f, 0.f);
 			const FVector DrummerPos = Base + SpawnFacing.Quaternion().RotateVector(DrummerLocalPos);
 
 			FTransformFragment& DTF = EM.GetFragmentDataChecked<FTransformFragment>(DrummerEntity);
@@ -490,9 +495,10 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 	const int32 LiveCount = LiveSoldiers.Num();
 
 	// Formation geometry sized to the LIVING count, not the original roster.
+	// HalfFront uses ColSpacing (tight ranks); HalfDepth uses full SpawnSpacing.
 	const int32 LiveRows  = FMath::Max(1, FMath::CeilToInt((float)LiveCount / LocalRowSize));
 	const int32 NumRows   = LiveRows;
-	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
+	const float HalfFront = LocalRowSize * ColSpacing() * 0.5f;
 	const float HalfDepth = LiveRows     * SpawnSpacing * 0.5f;
 
 	// ── Determine front-line direction ────────────────────────────────────────
@@ -529,7 +535,7 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		// Col = position along front line (X of rotation)
 		// Row = depth, front row (Row=0) at +Y, back rows toward -Y
 		const FVector LocalOffset(
-			Col * SpawnSpacing - HalfFront,
+			Col * ColSpacing() - HalfFront,
 			HalfDepth - Row * SpawnSpacing,
 			0.f
 		);
@@ -596,16 +602,15 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		NCO.bHasTarget       = false;   // clear stale target on new order
 	}
 
-	// ── Update drummer formation positions (between line and NCOs) ────────────
+	// ── Update drummer/fifer positions — BESIDE the officer at the front ──────
 	for (int32 d = 0; d < DrummerEntities.Num(); ++d)
 	{
 		if (!EM.IsEntityValid(DrummerEntities[d])) continue;
 		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntities[d]);
-		const float LateralOffset = (DrummerEntities.Num() > 1)
-			? (static_cast<float>(d) / (DrummerEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
-			: 0.f;
-		const FVector RearLocal(LateralOffset, -(HalfDepth + SpawnSpacing * 0.4f), 0.f);
-		DR.FormationPos     = NewWorldTarget + FormRot.RotateVector(RearLocal);
+		const float SideStep = 150.f;
+		const float LateralOffset = (static_cast<float>(d) + 1.f) * SideStep;
+		const FVector FrontLocal(LateralOffset, HalfDepth + 100.f, 0.f);
+		DR.FormationPos     = NewWorldTarget + FormRot.RotateVector(FrontLocal);
 		DR.bHasFormationPos = true;
 	}
 
@@ -745,7 +750,7 @@ void ABattleSpawnerActor::IssueHaltOrder()
 	else
 		Cols = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)N)));
 	const int32 Rows      = FMath::Max(1, FMath::CeilToInt((float)N / Cols));
-	const float HalfFront = Cols * SpawnSpacing * 0.5f;
+	const float HalfFront = Cols * ColSpacing() * 0.5f;
 
 	// ── Slot assignment: frontmost soldiers fill the front rank, dress forward.
 	// Sort all soldiers front→back, then within each rank sort left→right so men
@@ -778,7 +783,7 @@ void ABattleSpawnerActor::IssueHaltOrder()
 		const FMassEntityHandle E = Living[Slot[k]];
 
 		const float SlotF = FrontF - Row * SpawnSpacing;
-		const float SlotL = LatCenter + (Col - (Cols - 1) * 0.5f) * SpawnSpacing;
+		const float SlotL = LatCenter + (Col - (Cols - 1) * 0.5f) * ColSpacing();
 		const FVector SlotPos = Fwd * SlotF + LatDir * SlotL + FVector(0.f, 0.f, BaseZ);
 
 		FOrderFragment& OF = EM.GetFragmentDataChecked<FOrderFragment>(E);
@@ -847,11 +852,11 @@ void ABattleSpawnerActor::IssueHaltOrder()
 	{
 		if (!EM.IsEntityValid(DrummerEntities[d])) continue;
 		FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntities[d]);
-		const float Spread = (DrummerEntities.Num() > 1)
-			? (static_cast<float>(d) / (DrummerEntities.Num() - 1) - 0.5f) * (HalfFront * 2.f) * 0.5f
-			: 0.f;
-		DR.FormationPos     = Fwd * (RearF - SpawnSpacing * 0.4f)
-			+ LatDir * (LatCenter + Spread) + FVector(0.f, 0.f, BaseZ);
+		// Beside the officer at the front, fanned to one flank.
+		const float SideStep = 150.f;
+		const float Side = (static_cast<float>(d) + 1.f) * SideStep;
+		DR.FormationPos     = Fwd * (FrontF + 100.f)
+			+ LatDir * (LatCenter + Side) + FVector(0.f, 0.f, BaseZ);
 		DR.bHasFormationPos = true;
 		DR.MoveSpeed        = MarchSpeed;
 	}
@@ -1268,7 +1273,7 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 	const int32 LiveCount = LiveSoldiers.Num();
 
 	const int32 NumRows   = FMath::Max(1, FMath::CeilToInt((float)LiveCount / LocalRowSize));
-	const float HalfFront = LocalRowSize * SpawnSpacing * 0.5f;
+	const float HalfFront = LocalRowSize * ColSpacing() * 0.5f;
 	const float HalfDepth = NumRows      * SpawnSpacing * 0.5f;
 
 	// Front line perpendicular to march direction (toward enemy)
@@ -1283,7 +1288,7 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 		const int32 Col = k % LocalRowSize;
 		const int32 Row = k / LocalRowSize;
 		const FVector LocalOffset(
-			Col * SpawnSpacing - HalfFront,
+			Col * ColSpacing() - HalfFront,
 			HalfDepth - Row * SpawnSpacing,
 			0.f
 		);
@@ -1410,7 +1415,7 @@ void ABattleSpawnerActor::UpdateEngagement()
 			const int32 Col = i % LocalRowSize;
 			const int32 Row = i / LocalRowSize;
 			const FVector LocalOffset(
-				Col * SpawnSpacing - HalfFront,
+				Col * ColSpacing() - HalfFront,
 				HalfDepth - Row * SpawnSpacing,
 				0.f
 			);
