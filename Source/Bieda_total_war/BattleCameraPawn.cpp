@@ -127,6 +127,8 @@ void ABattleCameraPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	EIC->BindAction(RMBAction,         ETriggerEvent::Completed, this, &ABattleCameraPawn::OnRMBEnd);
 	EIC->BindAction(ESCAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnESCPress);
 	EIC->BindAction(PauseAction,       ETriggerEvent::Started,   this, &ABattleCameraPawn::OnPausePress);
+	EIC->BindAction(SlowerAction,      ETriggerEvent::Started,   this, &ABattleCameraPawn::OnSlowerPress);
+	EIC->BindAction(FasterAction,      ETriggerEvent::Started,   this, &ABattleCameraPawn::OnFasterPress);
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -156,6 +158,8 @@ void ABattleCameraPawn::BuildInputSetup()
 	RMBAction->Triggers.Add(NewObject<UInputTriggerDown>(this));
 	ESCAction         = MakeAction(TEXT("BattleESC"),         EInputActionValueType::Boolean);
 	PauseAction       = MakeAction(TEXT("BattlePause"),       EInputActionValueType::Boolean);
+	SlowerAction      = MakeAction(TEXT("BattleSlower"),      EInputActionValueType::Boolean);
+	FasterAction      = MakeAction(TEXT("BattleFaster"),      EInputActionValueType::Boolean);
 
 	BattleIMC = NewObject<UInputMappingContext>(this, TEXT("BattleIMC"));
 
@@ -180,6 +184,8 @@ void ABattleCameraPawn::BuildInputSetup()
 	BattleIMC->MapKey(RMBAction,         EKeys::RightMouseButton);
 	BattleIMC->MapKey(ESCAction,         EKeys::Escape);
 	BattleIMC->MapKey(PauseAction,       EKeys::SpaceBar);
+	BattleIMC->MapKey(SlowerAction,      EKeys::LeftBracket);
+	BattleIMC->MapKey(FasterAction,      EKeys::RightBracket);
 }
 
 void ABattleCameraPawn::ApplyMappingContext()
@@ -344,6 +350,16 @@ void ABattleCameraPawn::OnPausePress(const FInputActionValue& Value)
 	// (camera) and the order handlers keep running, so the player can pan and
 	// queue move/attack orders while time is stopped — Total War style.
 	ToggleBattleSimPaused();
+}
+
+void ABattleCameraPawn::OnSlowerPress(const FInputActionValue& Value)
+{
+	StepBattleSimTimeScale(-1);   // [ → slow down the battle
+}
+
+void ABattleCameraPawn::OnFasterPress(const FInputActionValue& Value)
+{
+	StepBattleSimTimeScale(+1);   // ] → speed up the battle
 }
 
 // ── LMB: press → record, release → act ──────────────────────────────────────

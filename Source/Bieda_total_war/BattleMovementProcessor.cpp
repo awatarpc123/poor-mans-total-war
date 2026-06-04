@@ -70,7 +70,7 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 
 	MovementQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Ctx)
 	{
-		const float DeltaTime = Ctx.GetDeltaTimeSeconds();
+		const float DeltaTime = Ctx.GetDeltaTimeSeconds() * BattleSimTimeScale();
 		auto        Transforms = Ctx.GetMutableFragmentView<FTransformFragment>();
 		const auto  States     = Ctx.GetFragmentView<FAgentStateFragment>();
 		const auto  Orders     = Ctx.GetFragmentView<FOrderFragment>();

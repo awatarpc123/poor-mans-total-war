@@ -128,7 +128,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	FBattleSpatialGrid Grid;
 	Grid.Build(Positions, RoutingRadius);
 
-	const float DT = Context.GetDeltaTimeSeconds();
+	const float DT = Context.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
 	// -----------------------------------------------------------------------
 	// Pass 1b: panic contagion needs CRITICAL MASS. Count, per squad, the

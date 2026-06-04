@@ -62,7 +62,7 @@ void UBattleOfficerProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 			Soldiers.Add({ Transforms[i].GetTransform().GetLocation(), States[i].State, Factions[i].SquadId });
 	});
 
-	const float DT = Context.GetDeltaTimeSeconds();
+	const float DT = Context.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
 	// -----------------------------------------------------------------------
 	// Pass 2: update each officer (only considers own-squad soldiers)

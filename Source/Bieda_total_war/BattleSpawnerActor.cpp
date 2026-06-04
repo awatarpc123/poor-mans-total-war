@@ -36,13 +36,15 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	// Simulation helpers freeze on tactical pause; visualization keeps drawing
-	// the frozen state so the player can pan around and issue orders.
+	// the frozen state so the player can pan around and issue orders. Their
+	// time-based logic (shock decay, volley gap) scales with game speed too.
 	if (!BattleSimPaused())
 	{
+		const float SimDelta = DeltaSeconds * BattleSimTimeScale();
 		UpdateEngagement();
-		UpdateVolley(DeltaSeconds);
+		UpdateVolley(SimDelta);
 		UpdateStragglers();
-		UpdateCasualtyShock(DeltaSeconds);
+		UpdateCasualtyShock(SimDelta);
 	}
 	UpdateVisualization();
 }

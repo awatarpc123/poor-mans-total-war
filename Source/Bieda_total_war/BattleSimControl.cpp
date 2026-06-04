@@ -23,3 +23,34 @@ void ToggleBattleSimPaused()
 {
 	SetBattleSimPaused(!BattleSimPaused());
 }
+
+// ── Game speed ───────────────────────────────────────────────────────────────
+static TAutoConsoleVariable<float> CVarBiedaTimeScale(
+	TEXT("bieda.TimeScale"),
+	1.0f,
+	TEXT("Battle simulation speed multiplier (slow-mo / fast-forward). Camera unaffected."),
+	ECVF_Default);
+
+float BattleSimTimeScale()
+{
+	return FMath::Max(0.f, CVarBiedaTimeScale.GetValueOnAnyThread());
+}
+
+void StepBattleSimTimeScale(int32 Dir)
+{
+	// Fixed, predictable steps so the UI can show a clean "x2" etc.
+	static const float Steps[] = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
+	const int32 N = UE_ARRAY_COUNT(Steps);
+
+	// Find the nearest current step, then move by Dir within bounds.
+	const float Cur = BattleSimTimeScale();
+	int32 Idx = 2;   // default to 1.0
+	float Best = FLT_MAX;
+	for (int32 i = 0; i < N; ++i)
+	{
+		const float D = FMath::Abs(Steps[i] - Cur);
+		if (D < Best) { Best = D; Idx = i; }
+	}
+	Idx = FMath::Clamp(Idx + (Dir > 0 ? 1 : -1), 0, N - 1);
+	CVarBiedaTimeScale->Set(Steps[Idx], ECVF_SetByCode);
+}

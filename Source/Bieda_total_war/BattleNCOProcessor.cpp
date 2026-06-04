@@ -52,7 +52,7 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 {
 	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaNCO);
-	const float DT = Context.GetDeltaTimeSeconds();
+	const float DT = Context.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
 	// -------------------------------------------------------------------
 	// Pass 0: snapshot all soldiers

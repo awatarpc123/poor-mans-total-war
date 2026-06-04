@@ -29,7 +29,7 @@ void UBattleDrummerProcessor::Execute(FMassEntityManager& EntityManager, FMassEx
 {
 	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaDrummer);
-	const float DT = Context.GetDeltaTimeSeconds();
+	const float DT = Context.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
 	DrummerQuery.ForEachEntityChunk(Context, [DT](FMassExecutionContext& Ctx)
 	{

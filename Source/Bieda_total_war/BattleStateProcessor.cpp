@@ -31,7 +31,7 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 	SCOPE_CYCLE_COUNTER(STAT_BiedaState);
 	StateQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Ctx)
 	{
-		const float DT = Ctx.GetDeltaTimeSeconds();
+		const float DT = Ctx.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
 		const auto Transforms = Ctx.GetFragmentView<FTransformFragment>();
 		auto       States     = Ctx.GetMutableFragmentView<FAgentStateFragment>();

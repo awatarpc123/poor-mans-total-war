@@ -16,3 +16,13 @@
 BIEDA_TOTAL_WAR_API bool  BattleSimPaused();
 BIEDA_TOTAL_WAR_API void  SetBattleSimPaused(bool bPaused);
 BIEDA_TOTAL_WAR_API void  ToggleBattleSimPaused();
+
+// ── Game speed (slow-motion / fast-forward) ──────────────────────────────────
+// A simulation time multiplier applied to every battle processor's delta time:
+// the battle runs slower or faster while the CAMERA stays at normal speed. Steps
+// through a fixed set {0.25, 0.5, 1, 2, 4}. Independent of pause (when paused the
+// processors early-out before using DT, so the scale is irrelevant there).
+//   StepBattleSimTimeScale(+1) → faster,  (-1) → slower.
+// Backed by the `bieda.TimeScale` console variable.
+BIEDA_TOTAL_WAR_API float BattleSimTimeScale();
+BIEDA_TOTAL_WAR_API void  StepBattleSimTimeScale(int32 Dir);
