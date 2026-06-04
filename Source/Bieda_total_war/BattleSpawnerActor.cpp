@@ -1800,9 +1800,14 @@ void ABattleSpawnerActor::UpdateVisualization()
 		DeadSoldierHISM->ClearInstances();
 		if (CorporalHISM) CorporalHISM->ClearInstances();
 
-		if (AliveT.Num() > 0) SoldierHISM->AddInstances(AliveT, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/true);
-		if (DeadT.Num()  > 0) DeadSoldierHISM->AddInstances(DeadT, false, true);
-		if (CorporalHISM && CorpT.Num() > 0) CorporalHISM->AddInstances(CorpT, false, true);
+		// NOTE: AddInstances(..., bWorldSpace=true) silently failed to place the
+		// instances here (HISM uses SetAbsolute) — the men were alive but unseen.
+		// The transforms are already absolute world transforms and the component
+		// sits at the origin, so add them in LOCAL space (bWorldSpace=false),
+		// which AddInstances handles reliably. Still one batched call per HISM.
+		if (AliveT.Num() > 0) SoldierHISM->AddInstances(AliveT, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/false);
+		if (DeadT.Num()  > 0) DeadSoldierHISM->AddInstances(DeadT, false, false);
+		if (CorporalHISM && CorpT.Num() > 0) CorporalHISM->AddInstances(CorpT, false, false);
 	}
 
 	// ── Officer ───────────────────────────────────────────────────────────
