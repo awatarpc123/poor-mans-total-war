@@ -139,9 +139,10 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	// -----------------------------------------------------------------------
 	TMap<uint8, int32> SquadAlive;
 	TMap<uint8, int32> SquadBreaking;
+	TMap<uint8, int32> SquadDead;
 	for (const FAgentSnap& S : Snaps)
 	{
-		if (S.State == EAgentState::DEAD) continue;
+		if (S.State == EAgentState::DEAD) { SquadDead.FindOrAdd(S.SquadId)++; continue; }
 		SquadAlive.FindOrAdd(S.SquadId)++;
 		if (S.State == EAgentState::ROUTING ||
 			S.State == EAgentState::RALLYING ||
@@ -156,6 +157,20 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		if (Alive <= 0) return 1.f;
 		const float Frac = static_cast<float>(SquadBreaking.FindRef(SquadId)) / Alive;
 		return FMath::Clamp((Frac - ContagionFloor) / (ContagionFull - ContagionFloor), 0.f, 1.f);
+	};
+	// Corpse-shock scale: seeing a couple of bodies in a full 150-man company is
+	// nothing; seeing them when half the unit is already down is grim. Scale the
+	// dead-neighbour drain by the squad's casualty FRACTION (dead / original),
+	// so 2/150 barely registers but heavy losses bite. Floor 0.15 so it's never
+	// literally free. Original strength = current alive + dead this squad.
+	auto CorpseShockScale = [&](uint8 SquadId) -> float
+	{
+		const int32 Alive = SquadAlive.FindRef(SquadId);
+		const int32 Dead  = SquadDead.FindRef(SquadId);
+		const int32 Orig  = Alive + Dead;
+		if (Orig <= 0) return 0.f;
+		const float Frac = static_cast<float>(Dead) / static_cast<float>(Orig);
+		return 0.15f + 0.85f * FMath::Clamp(Frac, 0.f, 1.f);
 	};
 
 	// -----------------------------------------------------------------------
@@ -246,11 +261,12 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 			// Gate panic contagion (routing/shaken neighbours) by the squad's
 			// critical mass: a lone breaker among steady men spreads nothing.
-			// Corpse shock (DeadDrain) and cohesion bonus are NOT gated — those
-			// are direct, not contagion.
+			// Corpse shock is scaled by the squad's casualty fraction instead —
+			// a couple of bodies in a near-full unit barely register; heavy
+			// losses make every nearby corpse grim. Cohesion bonus stays direct.
 			const float Contagion = ContagionGain(MySquad);
 			Morale -= (RoutingDrain + ShakenDrain) * Contagion * DT;
-			Morale -= DeadDrain * DT;
+			Morale -= DeadDrain * CorpseShockScale(MySquad) * DT;
 			Morale += StableBonus * DT;
 
 			// ── Officer effects — by SquadId (own officer only) ───────────
