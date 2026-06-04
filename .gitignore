@@ -34,3 +34,6 @@ _backup_*/
 
 # ── Local Claude Code settings ───────────────────────────────────────────────
 .claude/
+
+# Personal/non-project files that live in the project root
+wodomierz.*
