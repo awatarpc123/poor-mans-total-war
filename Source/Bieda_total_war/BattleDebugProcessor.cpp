@@ -13,7 +13,8 @@
 // builds and perf tests run clean; flip to 1 when you want the diagnostic view.
 static TAutoConsoleVariable<int32> CVarBiedaDebug(
 	TEXT("bieda.Debug"),
-	0,
+	1,   // default ON so the debug shapes show without typing it each run;
+	     // set `bieda.Debug 0` for a perf pass (debug draw is costly at 1000+).
 	TEXT("Draw Bieda battle debug shapes (0=off, 1=on). Costs a lot at 1000+ agents."),
 	ECVF_Default);
 
