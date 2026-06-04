@@ -45,7 +45,7 @@ public:
 	FVector BattlefieldCentre = FVector::ZeroVector;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "1000"))
-	float BattlefieldRadius = 15000.f;
+	float BattlefieldRadius = 20000.f;
 
 	/** Player's team id (everything else is treated as hostile to the player). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field")
