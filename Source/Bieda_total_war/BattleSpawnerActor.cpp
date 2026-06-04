@@ -251,7 +251,10 @@ void ABattleSpawnerActor::SpawnAgents()
 			VF.PersonalSnapTime         = FMath::FRandRange( 1.5f,  2.5f);
 			VF.PersonalDriftAmp         = FMath::FRandRange( 0.5f,  3.f);
 			VF.PersonalWaverAmp         = FMath::FRandRange( 0.005f, 0.03f);
-			VF.PersonalSeparationRadius = FMath::FRandRange(80.f, 120.f);
+			// Shoulder-to-shoulder: separation MUST be smaller than the column
+			// spacing (ColSpacing = SpawnSpacing*0.5, ~60cm) or neighbours shove
+			// each other out of the slot and the rank dissolves into a blob.
+			VF.PersonalSeparationRadius = FMath::FRandRange(35.f, 50.f);
 			FinalOffsetMax              = 25.f;
 		}
 		else  // Militia
