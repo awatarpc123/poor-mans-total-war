@@ -1708,13 +1708,19 @@ void ABattleSpawnerActor::UpdateVisualization()
 	constexpr float AliveZOff    = 85.f;    // half of 170
 
 	// ── Soldiers (corporals routed to CorporalHISM — visual marker only) ────
+	// PERF: gather transforms into arrays, then push each HISM in ONE batched
+	// AddInstances call. The old per-instance ClearInstances+AddInstance rebuilt
+	// the HISM cluster tree on EVERY call (2000×/frame) — a game-thread killer.
+	// AddInstances builds the tree once per HISM instead.
 	if (SoldierHISM && DeadSoldierHISM)
 	{
-		SoldierHISM->ClearInstances();
-		DeadSoldierHISM->ClearInstances();
-		if (CorporalHISM) CorporalHISM->ClearInstances();
-
 		const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
+
+		TArray<FTransform> AliveT, DeadT, CorpT;
+		AliveT.Reserve(SoldierCount);
+		DeadT.Reserve(SoldierCount / 4);
+		if (CorporalHISM) CorpT.Reserve(NumCorporals);
+
 		for (int32 i = 0; i < SoldierCount; ++i)
 		{
 			const FMassEntityHandle Entity = SpawnedEntities[i];
@@ -1729,25 +1735,30 @@ void ABattleSpawnerActor::UpdateVisualization()
 				FVector Pos = TF.GetTransform().GetLocation();
 				Pos.Z = 15.f;
 				const float Yaw = TF.GetTransform().Rotator().Yaw;
-				FTransform DeadT(FRotator(0.f, Yaw, 90.f).Quaternion(), Pos,
+				DeadT.Emplace(FRotator(0.f, Yaw, 90.f).Quaternion(), Pos,
 					FVector(AliveScaleXY, AliveScaleXY, AliveScaleZ));
-				DeadSoldierHISM->AddInstance(DeadT, /*bWorldSpace=*/true);
 			}
 			else
 			{
 				FVector Pos = TF.GetTransform().GetLocation();
 				Pos.Z += AliveZOff;
-				FTransform AliveT(TF.GetTransform().GetRotation(), Pos,
+				const FTransform T(TF.GetTransform().GetRotation(), Pos,
 					FVector(AliveScaleXY, AliveScaleXY, AliveScaleZ));
 
 				const bool bCorporal = CorporalHISM
 					&& CorporalFlags.IsValidIndex(i) && CorporalFlags[i];
-				if (bCorporal)
-					CorporalHISM->AddInstance(AliveT, /*bWorldSpace=*/true);
-				else
-					SoldierHISM->AddInstance(AliveT, /*bWorldSpace=*/true);
+				if (bCorporal) CorpT.Add(T);
+				else           AliveT.Add(T);
 			}
 		}
+
+		SoldierHISM->ClearInstances();
+		DeadSoldierHISM->ClearInstances();
+		if (CorporalHISM) CorporalHISM->ClearInstances();
+
+		if (AliveT.Num() > 0) SoldierHISM->AddInstances(AliveT, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/true);
+		if (DeadT.Num()  > 0) DeadSoldierHISM->AddInstances(DeadT, false, true);
+		if (CorporalHISM && CorpT.Num() > 0) CorporalHISM->AddInstances(CorpT, false, true);
 	}
 
 	// ── Officer ───────────────────────────────────────────────────────────
@@ -1772,59 +1783,59 @@ void ABattleSpawnerActor::UpdateVisualization()
 	// ── NCOs ──────────────────────────────────────────────────────────────
 	if (NCOHISM)
 	{
-		NCOHISM->ClearInstances();
+		// NCO: slightly taller and wider than officer (~210 cm tall).
+		// Z offset must match half-height (scale.Z * 100 / 2) so the capsule
+		// stands ON the ground, not buried under it.
+		constexpr float NCOScaleXY = 0.45f;
+		constexpr float NCOScaleZ  = 2.1f;
+		constexpr float NCOZOff    = 105.f;   // half of 210
 
+		TArray<FTransform> NCOTs;
+		NCOTs.Reserve(NCOEntities.Num());
 		for (const FMassEntityHandle& NCOHandle : NCOEntities)
 		{
 			if (!EM.IsEntityValid(NCOHandle)) continue;
 
 			const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(NCOHandle);
 			const FNCOFragment& NCO      = EM.GetFragmentDataChecked<FNCOFragment>(NCOHandle);
+			if (!NCO.bIsAlive) continue;
 
-			if (NCO.bIsAlive)
-			{
-				// NCO: slightly taller and wider than officer (~210 cm tall).
-				// Z offset must match half-height (scale.Z * 100 / 2) so the
-				// capsule stands ON the ground, not buried under it.
-				constexpr float NCOScaleXY = 0.45f;
-				constexpr float NCOScaleZ  = 2.1f;
-				constexpr float NCOZOff    = 105.f;   // half of 210
-
-				FVector Pos = TF.GetTransform().GetLocation();
-				Pos.Z += NCOZOff;
-				FTransform NT(TF.GetTransform().GetRotation(), Pos,
-					FVector(NCOScaleXY, NCOScaleXY, NCOScaleZ));
-				NCOHISM->AddInstance(NT, true);
-			}
+			FVector Pos = TF.GetTransform().GetLocation();
+			Pos.Z += NCOZOff;
+			NCOTs.Emplace(TF.GetTransform().GetRotation(), Pos,
+				FVector(NCOScaleXY, NCOScaleXY, NCOScaleZ));
 		}
+
+		NCOHISM->ClearInstances();
+		if (NCOTs.Num() > 0) NCOHISM->AddInstances(NCOTs, false, true);
 	}
 
 	// ── Drummers ──────────────────────────────────────────────────────────
 	if (DrummerHISM)
 	{
-		DrummerHISM->ClearInstances();
+		// Drummer: a touch shorter than a private (~175 cm), distinct material.
+		constexpr float DrumScaleXY = 0.32f;
+		constexpr float DrumScaleZ  = 1.75f;
+		constexpr float DrumZOff    = 87.5f;   // half of 175
 
+		TArray<FTransform> DrumTs;
+		DrumTs.Reserve(DrummerEntities.Num());
 		for (const FMassEntityHandle& DrummerHandle : DrummerEntities)
 		{
 			if (!EM.IsEntityValid(DrummerHandle)) continue;
 
 			const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(DrummerHandle);
 			const FDrummerFragment& DR   = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerHandle);
+			if (!DR.bIsAlive) continue;
 
-			if (DR.bIsAlive)
-			{
-				// Drummer: a touch shorter than a private (~175 cm), distinct material.
-				constexpr float DrumScaleXY = 0.32f;
-				constexpr float DrumScaleZ  = 1.75f;
-				constexpr float DrumZOff    = 87.5f;   // half of 175
-
-				FVector Pos = TF.GetTransform().GetLocation();
-				Pos.Z += DrumZOff;
-				FTransform DT(TF.GetTransform().GetRotation(), Pos,
-					FVector(DrumScaleXY, DrumScaleXY, DrumScaleZ));
-				DrummerHISM->AddInstance(DT, true);
-			}
+			FVector Pos = TF.GetTransform().GetLocation();
+			Pos.Z += DrumZOff;
+			DrumTs.Emplace(TF.GetTransform().GetRotation(), Pos,
+				FVector(DrumScaleXY, DrumScaleXY, DrumScaleZ));
 		}
+
+		DrummerHISM->ClearInstances();
+		if (DrumTs.Num() > 0) DrummerHISM->AddInstances(DrumTs, false, true);
 	}
 
 	// ── Fire range arc + facing arrow (debug only) ───────────────────────
