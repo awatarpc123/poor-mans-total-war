@@ -3,6 +3,7 @@
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
+#include "BattleSimControl.h"
 #include "BattleStats.h"
 
 DECLARE_CYCLE_STAT(TEXT("Order"), STAT_BiedaOrder, STATGROUP_Bieda);
@@ -68,6 +69,8 @@ void UBattleOrderProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 
 void UBattleOrderProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	if (BattleSimPaused()) return;
+	SCOPE_CYCLE_COUNTER(STAT_BiedaOrder);
 	const float DT = Context.GetDeltaTimeSeconds();
 
 	// -----------------------------------------------------------------------

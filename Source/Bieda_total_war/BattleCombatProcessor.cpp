@@ -4,6 +4,7 @@
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
 #include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
+#include "BattleSimControl.h"       // BattleSimPaused()
 #include "BattleStats.h"
 #include "DrawDebugHelpers.h"
 
@@ -58,6 +59,7 @@ void UBattleCombatProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 
 void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaCombat);
 	UWorld* World = GetWorld();
 

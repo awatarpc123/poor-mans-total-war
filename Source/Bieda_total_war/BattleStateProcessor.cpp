@@ -2,6 +2,7 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleSimControl.h"
 #include "BattleStats.h"
 
 DECLARE_CYCLE_STAT(TEXT("State"), STAT_BiedaState, STATGROUP_Bieda);
@@ -26,6 +27,7 @@ void UBattleStateProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 
 void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaState);
 	StateQuery.ForEachEntityChunk(Context, [](FMassExecutionContext& Ctx)
 	{

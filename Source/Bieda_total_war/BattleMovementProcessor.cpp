@@ -3,6 +3,7 @@
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
+#include "BattleSimControl.h"
 #include "BattleStats.h"
 
 DECLARE_CYCLE_STAT(TEXT("Movement"), STAT_BiedaMovement, STATGROUP_Bieda);
@@ -34,6 +35,7 @@ void UBattleMovementProcessor::ConfigureQueries(const TSharedRef<FMassEntityMana
 
 void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaMovement);
 	const float WorldTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
 

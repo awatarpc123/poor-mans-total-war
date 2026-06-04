@@ -8,6 +8,7 @@
 #include "GameFramework/SpectatorPawnMovement.h"
 #include "DrawDebugHelpers.h"
 #include "BattleSpawnerActor.h"
+#include "BattleSimControl.h"   // ToggleBattleSimPaused()
 #include "EngineUtils.h"
 
 ABattleCameraPawn::ABattleCameraPawn()
@@ -125,6 +126,7 @@ void ABattleCameraPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 	EIC->BindAction(RMBAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnRMBStart);
 	EIC->BindAction(RMBAction,         ETriggerEvent::Completed, this, &ABattleCameraPawn::OnRMBEnd);
 	EIC->BindAction(ESCAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnESCPress);
+	EIC->BindAction(PauseAction,       ETriggerEvent::Started,   this, &ABattleCameraPawn::OnPausePress);
 
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 	{
@@ -153,6 +155,7 @@ void ABattleCameraPawn::BuildInputSetup()
 	RMBAction         = MakeAction(TEXT("BattleRMB"),         EInputActionValueType::Boolean);
 	RMBAction->Triggers.Add(NewObject<UInputTriggerDown>(this));
 	ESCAction         = MakeAction(TEXT("BattleESC"),         EInputActionValueType::Boolean);
+	PauseAction       = MakeAction(TEXT("BattlePause"),       EInputActionValueType::Boolean);
 
 	BattleIMC = NewObject<UInputMappingContext>(this, TEXT("BattleIMC"));
 
@@ -176,6 +179,7 @@ void ABattleCameraPawn::BuildInputSetup()
 	BattleIMC->MapKey(LMBAction,         EKeys::LeftMouseButton);
 	BattleIMC->MapKey(RMBAction,         EKeys::RightMouseButton);
 	BattleIMC->MapKey(ESCAction,         EKeys::Escape);
+	BattleIMC->MapKey(PauseAction,       EKeys::SpaceBar);
 }
 
 void ABattleCameraPawn::ApplyMappingContext()
@@ -332,6 +336,14 @@ void ABattleCameraPawn::OnRMBEnd(const FInputActionValue& Value)
 void ABattleCameraPawn::OnESCPress(const FInputActionValue& Value)
 {
 	SelectedSpawner = nullptr;
+}
+
+void ABattleCameraPawn::OnPausePress(const FInputActionValue& Value)
+{
+	// Tactical pause: freezes the battle simulation only. This pawn's Tick
+	// (camera) and the order handlers keep running, so the player can pan and
+	// queue move/attack orders while time is stopped — Total War style.
+	ToggleBattleSimPaused();
 }
 
 // ── LMB: press → record, release → act ──────────────────────────────────────

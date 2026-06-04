@@ -4,6 +4,7 @@
 #include "MassCommonFragments.h"
 #include "BattleTypes.h"
 #include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
+#include "BattleSimControl.h"       // BattleSimPaused()
 #include "BattleStats.h"
 #include "DrawDebugHelpers.h"
 
@@ -33,10 +34,16 @@ void ABattleSpawnerActor::BeginPlay()
 void ABattleSpawnerActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
-	UpdateEngagement();
-	UpdateVolley(DeltaSeconds);
-	UpdateStragglers();
-	UpdateCasualtyShock(DeltaSeconds);
+
+	// Simulation helpers freeze on tactical pause; visualization keeps drawing
+	// the frozen state so the player can pan around and issue orders.
+	if (!BattleSimPaused())
+	{
+		UpdateEngagement();
+		UpdateVolley(DeltaSeconds);
+		UpdateStragglers();
+		UpdateCasualtyShock(DeltaSeconds);
+	}
 	UpdateVisualization();
 }
 

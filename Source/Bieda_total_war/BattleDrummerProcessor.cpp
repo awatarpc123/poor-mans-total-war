@@ -2,6 +2,7 @@
 #include "MassCommonFragments.h"
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
+#include "BattleSimControl.h"
 #include "BattleStats.h"
 
 DECLARE_CYCLE_STAT(TEXT("Drummer"), STAT_BiedaDrummer, STATGROUP_Bieda);
@@ -26,6 +27,7 @@ void UBattleDrummerProcessor::ConfigureQueries(const TSharedRef<FMassEntityManag
 
 void UBattleDrummerProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
+	if (BattleSimPaused()) return;
 	SCOPE_CYCLE_COUNTER(STAT_BiedaDrummer);
 	const float DT = Context.GetDeltaTimeSeconds();
 

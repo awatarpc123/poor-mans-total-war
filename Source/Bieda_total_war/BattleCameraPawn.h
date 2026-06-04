@@ -20,6 +20,7 @@ class ABattleSpawnerActor;
  *   LMB (click)      — select unit / quick move order (keep formation)
  *   LMB (drag)       — drag-to-form: draw front line, set formation width + facing
  *   ESC              — deselect current unit
+ *   Space            — tactical pause (freeze sim; camera + orders stay live)
  */
 UCLASS()
 class BIEDA_TOTAL_WAR_API ABattleCameraPawn : public ASpectatorPawn
@@ -47,6 +48,7 @@ private:
 	UPROPERTY() TObjectPtr<UInputAction> LMBAction;
 	UPROPERTY() TObjectPtr<UInputAction> RMBAction;
 	UPROPERTY() TObjectPtr<UInputAction> ESCAction;
+	UPROPERTY() TObjectPtr<UInputAction> PauseAction;
 
 	UPROPERTY() TObjectPtr<UInputMappingContext> BattleIMC;
 
@@ -90,4 +92,5 @@ private:
 	void OnRMBStart     (const FInputActionValue& Value);
 	void OnRMBEnd       (const FInputActionValue& Value);
 	void OnESCPress     (const FInputActionValue& Value);
+	void OnPausePress   (const FInputActionValue& Value);
 };
