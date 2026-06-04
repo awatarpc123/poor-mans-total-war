@@ -234,7 +234,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					const float   MyLat = FVector::DotProduct(MyPos, LatAxis);
 
 					// Keep the K best (lowest-score) candidates.
-					constexpr int32 K = 10;
+					constexpr int32 K = 20;
 					int32 BestIdx[K];
 					float BestScore[K];
 					int32 Found = 0;
