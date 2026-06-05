@@ -119,7 +119,7 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	// ── Morale modifiers ────────────────────────────────────────────────────
 	float MoraleDrainFire    = 15.f;
 	float MoraleDrainLoading = 0.5f;
-	float RouteRecoveryRate  = 3.f;
+	float RouteRecoveryRate  = 1.2f;   // morale/s regained while ROUTING (lower = panic lasts longer)
 	float PanicThreshold     = 20.f;   // morale < this → ROUTING (full panic, run)
 	float ShakenThreshold    = 40.f;   // PanicThreshold ≤ morale < this → SHAKEN (wavering, hold fire)
 	float ShakenRecover      = 50.f;   // morale ≥ this → SHAKEN steadies back to HOLDING (hysteresis)
@@ -142,6 +142,10 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 
 	FMassEntityHandle TargetEntity;          // current aim target (valid during AIMING)
 	bool bHasAcquiredTarget  = false;        // true when a valid target is locked
+
+	// ── Unit type (copied from spawner) — combat reads it for fire-spread width:
+	//    line infantry scatter over a wider candidate pool than militia. ───────
+	EUnitType UnitType       = EUnitType::Militia;
 
 	// ── Volley coordination (line infantry) ─────────────────────────────────
 	EVolleyMode VolleyMode   = EVolleyMode::FreeFire;

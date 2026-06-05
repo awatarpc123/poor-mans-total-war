@@ -83,9 +83,14 @@ void ABattleCameraPawn::Tick(float DeltaTime)
 				const FVector DragDir    = (CursorPos - DragStartPos).GetSafeNormal2D();
 				const FVector LineCenter = (DragStartPos + CursorPos) * 0.5f;
 
+				// Front faces AWAY along the drag: drag left→right and the unit looks
+				// the way you do; right→left and it faces back at you (Total War feel).
+				// Front line = negated drag direction. Preview must match the result.
+				const FVector FrontLineDir = -DragDir;
+
 				const int32 RowSize = FMath::Clamp(
 					FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
-					3, SelectedSpawner->NumAgents);
+					1, FMath::Max(1, SelectedSpawner->CountLiving()));   // live count, refreshes every frame
 
 				// Draw the drag line itself
 				DrawDebugLine(GetWorld(),
@@ -94,9 +99,12 @@ void ABattleCameraPawn::Tick(float DeltaTime)
 					FColor::Green, false, -1.f, 0, 3.f);
 
 				// Draw formation preview
+				// NumAgents → CountLiving(): the dot count tracks LIVING soldiers and
+				// refreshes each frame, so the last row shrinks live as the unit takes
+				// casualties while you're still dragging (Total War feel).
 				DrawFormationPreview(LineCenter, RowSize,
-					SelectedSpawner->NumAgents,
-					SelectedSpawner->SpawnSpacing, DragDir);
+					SelectedSpawner->CountLiving(),
+					SelectedSpawner->SpawnSpacing, FrontLineDir);
 			}
 		}
 	}
@@ -415,14 +423,16 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 
 			const int32 RowSize = FMath::Clamp(
 				FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
-				3, SelectedSpawner->NumAgents);
+				1, FMath::Max(1, SelectedSpawner->CountLiving()));   // live count, refreshes every frame
 
 			// Green confirmation circle
 			DrawDebugCircle(GetWorld(), LineCenter + FVector(0.f, 0.f, 5.f),
 				300.f, 32, FColor::Green, false, 1.5f, 0, 4.f,
 				FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
 
-			SelectedSpawner->IssueMoveOrder(LineCenter, RowSize, DragDir);
+			// Front faces AWAY along the drag (negate) so the result matches the
+				// preview: drag left→right → unit looks the way you do (Total War feel).
+				SelectedSpawner->IssueMoveOrder(LineCenter, RowSize, -DragDir);
 		}
 
 		bIsDragging = false;

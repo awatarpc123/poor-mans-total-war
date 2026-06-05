@@ -191,12 +191,30 @@ void ABattleSpawnerActor::SpawnAgents()
 	{
 		EffectiveRowSize = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)NumAgents)));
 	}
+
+	// Deployment-width cap (future deploy zones): if the rank would be wider than
+	// MaxDeployWidth, shrink it and let the overflow wrap into extra rows behind.
+	// 0 = no cap (default — nothing changes). Full width = Cols * ColSpacing().
+	if (MaxDeployWidth > 0.f && ColSpacing() > 0.f)
+	{
+		const int32 MaxCols = FMath::Max(1, FMath::FloorToInt(MaxDeployWidth / ColSpacing()));
+		EffectiveRowSize = FMath::Min(EffectiveRowSize, MaxCols);
+	}
+
 	CurrentRowSize = EffectiveRowSize;   // store for future quick-move orders
 
 	const FFormationDims Dims = ComputeFormationDims(EffectiveRowSize);
-	const int32 NumSpawnRows = Dims.Rows;
 	const float HalfFront    = Dims.HalfFront;   // half formation width
 	const float HalfDepth    = Dims.HalfDepth;   // half formation depth
+
+	// ── Direction basis (same convention as move/engage/halt) ────────────────
+	// Fwd = where soldiers look (toward the enemy), Lat = along the front line.
+	// Everything below is built as  Base + Lat*lateral + Fwd*forward  so the
+	// formation is ALWAYS perpendicular to the facing — never sideways.
+	FVector Fwd = SpawnFacing.Vector().GetSafeNormal2D();
+	if (Fwd.IsNearlyZero()) Fwd = FVector(1.f, 0.f, 0.f);
+	const FVector Lat(-Fwd.Y, Fwd.X, 0.f);
+	const FQuat   SpawnRot = FRotationMatrix::MakeFromX(Fwd).ToQuat();
 
 	SpawnedEntities.Reserve(NumAgents);
 
@@ -216,13 +234,16 @@ void ABattleSpawnerActor::SpawnAgents()
 	{
 		const int32 Row = i / EffectiveRowSize;
 		const int32 Col = i % EffectiveRowSize;
-		const FVector SpawnPos = Base
-			+ FVector(Col * ColSpacing() - HalfFront, Row * SpawnSpacing - HalfDepth, 0.f);
+		// Lateral spreads along the front line; forward places row 0 at the FRONT
+		// (toward Fwd) with later ranks stepping back — same as the dressed move.
+		const float LatOff = Col * ColSpacing() - HalfFront;
+		const float FwdOff = HalfDepth - Row * SpawnSpacing;
+		const FVector SpawnPos = Base + Lat * LatOff + Fwd * FwdOff;
 
 		FMassEntityHandle Entity = EM.CreateEntity(Archetype);
 
 		FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
-		TF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), SpawnPos, FVector::OneVector);
+		TF.GetMutableTransform() = FTransform(SpawnRot, SpawnPos, FVector::OneVector);
 
 		FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
 		SF.State = EAgentState::HOLDING;
@@ -295,6 +316,7 @@ void ABattleSpawnerActor::SpawnAgents()
 		CF.FireRange          = SoldierFireRange;
 		CF.VisionHalfAngleDeg = VisionHalfAngleDeg;
 		CF.VolleyMode         = VolleyMode;
+		CF.UnitType           = UnitType;
 		CF.bVolleyReady       = false;
 		CF.bVolleySignal      = false;
 
@@ -338,11 +360,10 @@ void ABattleSpawnerActor::SpawnAgents()
 		OfficerEntity = EM.CreateEntity(OfficerArchetype);
 
 		// Officer stands at the FRONT of the formation (centered, just ahead of the line)
-		const FVector OfficerPos = Base + SpawnFacing.Quaternion().RotateVector(
-			FVector(0.f, HalfDepth + 100.f, 0.f));
+		const FVector OfficerPos = Base + Fwd * (HalfDepth + 100.f);
 
 		FTransformFragment& OTF = EM.GetFragmentDataChecked<FTransformFragment>(OfficerEntity);
-		OTF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), OfficerPos, FVector::OneVector);
+		OTF.GetMutableTransform() = FTransform(SpawnRot, OfficerPos, FVector::OneVector);
 
 		FMoraleFragment& OMF = EM.GetFragmentDataChecked<FMoraleFragment>(OfficerEntity);
 		OMF.Morale = OfficerInitialMorale;
@@ -379,11 +400,11 @@ void ABattleSpawnerActor::SpawnAgents()
 			const float LateralOffset = (NumNCOs > 1)
 				? (static_cast<float>(n) / (NumNCOs - 1) - 0.5f) * (HalfFront * 2.f) * 0.8f
 				: 0.f;
-			const FVector NCOLocalPos(LateralOffset, -(HalfDepth + SpawnSpacing * 0.75f), 0.f);
-			const FVector NCOPos = Base + SpawnFacing.Quaternion().RotateVector(NCOLocalPos);
+			const FVector NCOPos = Base + Lat * LateralOffset
+				- Fwd * (HalfDepth + SpawnSpacing * 0.75f);
 
 			FTransformFragment& NTF = EM.GetFragmentDataChecked<FTransformFragment>(NCOEntity);
-			NTF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), NCOPos, FVector::OneVector);
+			NTF.GetMutableTransform() = FTransform(SpawnRot, NCOPos, FVector::OneVector);
 
 			FMoraleFragment& NMF = EM.GetFragmentDataChecked<FMoraleFragment>(NCOEntity);
 			NMF.Morale = OfficerInitialMorale;   // NCOs have officer-level morale
@@ -425,11 +446,11 @@ void ABattleSpawnerActor::SpawnAgents()
 			// to the flank so they don't overlap him.
 			const float SideStep = 150.f;   // cm out to the side per musician
 			const float LateralOffset = (static_cast<float>(d) + 1.f) * SideStep;
-			const FVector DrummerLocalPos(LateralOffset, HalfDepth + 100.f, 0.f);
-			const FVector DrummerPos = Base + SpawnFacing.Quaternion().RotateVector(DrummerLocalPos);
+			const FVector DrummerPos = Base + Lat * LateralOffset
+				+ Fwd * (HalfDepth + 100.f);
 
 			FTransformFragment& DTF = EM.GetFragmentDataChecked<FTransformFragment>(DrummerEntity);
-			DTF.GetMutableTransform() = FTransform(SpawnFacing.Quaternion(), DrummerPos, FVector::OneVector);
+			DTF.GetMutableTransform() = FTransform(SpawnRot, DrummerPos, FVector::OneVector);
 
 			FMoraleFragment& DMF = EM.GetFragmentDataChecked<FMoraleFragment>(DrummerEntity);
 			DMF.Morale = OfficerInitialMorale;   // drummers steady, near the colors

@@ -233,10 +233,13 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					const FVector LatAxis(-MyForwardN.Y, MyForwardN.X, 0.f);
 					const float   MyLat = FVector::DotProduct(MyPos, LatAxis);
 
-					// Keep the K best (lowest-score) candidates.
-					constexpr int32 K = 20;
-					int32 BestIdx[K];
-					float BestScore[K];
+					// Keep the K best (lowest-score) candidates. Line infantry fire in
+					// volleys and dogpile a narrow target hard, so they scatter over a
+					// WIDER pool (K=40) than militia (K=20). Fixed-size buffer = KMax.
+					constexpr int32 KMax = 40;
+					const int32 K = (CF.UnitType == EUnitType::LineInfantry) ? 40 : 20;
+					int32 BestIdx[KMax];
+					float BestScore[KMax];
 					int32 Found = 0;
 					for (int32 c = 0; c < K; ++c) { BestIdx[c] = INDEX_NONE; BestScore[c] = FLT_MAX; }
 

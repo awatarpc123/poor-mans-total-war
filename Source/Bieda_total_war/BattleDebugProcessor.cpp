@@ -242,7 +242,7 @@ void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			const float   Morale = Morales[i].Morale;
 			const bool    bEnemy = Factions[i].TeamId != 0;
 
-			// Capsule: color = current state
+			// Capsule: colour = current state
 			DrawDebugCapsule(World, Pos + Up, 50.f, 25.f, FQuat::Identity,
 				Color, false, -1.f, 0, 2.f);
 

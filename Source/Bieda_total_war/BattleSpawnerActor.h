@@ -68,6 +68,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
 	FRotator SpawnFacing = FRotator::ZeroRotator;
 
+	/** Max formation width (cm) when laying out the company. 0 = no limit.
+	 *  If the line would be wider than this, the rank is shortened and the
+	 *  overflow wraps into extra rows behind it — so a unit never spills past a
+	 *  deployment zone. Hook a deploy-zone's width to this once zones exist. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn", meta = (ClampMin = "0"))
+	float MaxDeployWidth = 0.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
 	float InitialMorale = 80.f;
 
