@@ -139,6 +139,14 @@ def sphere_mesh(radius, u=16, v=10, scale=(1.0, 1.0, 1.0)):
     return bm
 
 
+def box_mesh(sx, sy, sz):
+    """Axis-aligned box with the given full dimensions, centred at origin."""
+    bm = bmesh.new()
+    bmesh.ops.create_cube(bm, size=1.0)
+    bmesh.ops.scale(bm, vec=Vector((sx, sy, sz)), verts=bm.verts)
+    return bm
+
+
 # ===========================================================================
 # Materials  (Napoleonic British line infantry palette)
 # ===========================================================================
