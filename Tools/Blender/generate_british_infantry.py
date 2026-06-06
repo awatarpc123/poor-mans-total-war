@@ -1,23 +1,24 @@
 """
-Poor Man's Total War - British Line Infantry Generator (High-Detail)
-Run in Blender (Scripting tab) to generate a Napoleonic-era British infantryman.
+Poor Man's Total War - British Line Infantry Generator (High-Detail v3)
+Run in Blender (Scripting tab). Press Alt+P or click "Run Script".
 
-Usage:
-  1. Open Blender -> Scripting tab
-  2. Open this file (or paste it)
-  3. Press "Run Script" (Alt+P)
-  4. File -> Export -> FBX -> import into UE5
+Z=0 at ground, model faces +Y.  Export: FBX, Z Up, -Y Forward, Scale 1.0.
 
-This is the HIGH-DETAIL pass: polycount and topology are intentionally NOT
-optimised. Organic / cloth parts use dense primitives + an applied
-Subdivision Surface modifier (level 2) and smooth shading for natural,
-rounded forms. Spherical joints (shoulders, elbows, hips, knees) bridge the
-limb segments so the subdivided surface flows like fabric over a body
-instead of looking like cut-off cylinders.
-
-Coordinate convention: Z up, Z=0 at the ground, model faces +Y.
-Reference silhouette: British line infantry, c.1800-1815 (red coat with
-facings/lapels, white cross-belts, grey trousers, black gaiters, Belgic shako).
+ARCHITECTURE — no puppet look:
+  * Arms:  ONE ring_prism_mesh shoulder→wrist.  Shoulder bulge, elbow bump,
+           and forearm taper are baked into the ring radius sequence.
+           No ShoulderJoint / ElbowJoint objects exist.
+  * Legs:  Thigh (hip→knee) and shin (knee→ankle) are separate meshes but
+           their shared ring at KNEE_Z has IDENTICAL radii, so the
+           subdivided surfaces are visually flush — no ball visible.
+  * Torso: 9 elliptical sections (wide shoulder → cinched waist → hip).
+  * Head:  ring_prism_mesh, 9 anatomical sections (chin → crown).
+  * Coat tails: flat fabric panels (11 mm thick), not pillars.
+  * Cross-belts: narrowed (38 mm wide, 8 mm thick), projected onto the
+                 torso ellipse so they hug the chest.
+  * Organic parts: Subdivision Surface level 2 + Shade Smooth (applied).
+  * Flat panels (tails, lapels, belts): Subdivision level 1.
+  * No polycount limit.
 """
 
 import bpy
@@ -27,7 +28,7 @@ import math
 
 
 # ===========================================================================
-# Low-level helpers
+# Helpers
 # ===========================================================================
 
 def clear_scene():
@@ -42,13 +43,13 @@ def clear_scene():
 
 
 def make_material(name, r, g, b, rough=0.8, metal=0.0):
-    mat = bpy.data.materials.new(name=name)
-    mat.use_nodes = True
-    bsdf = mat.node_tree.nodes["Principled BSDF"]
-    bsdf.inputs["Base Color"].default_value = (r, g, b, 1.0)
-    bsdf.inputs["Roughness"].default_value = rough
-    bsdf.inputs["Metallic"].default_value = metal
-    return mat
+    m = bpy.data.materials.new(name=name)
+    m.use_nodes = True
+    b_ = m.node_tree.nodes["Principled BSDF"]
+    b_.inputs["Base Color"].default_value = (r, g, b, 1.0)
+    b_.inputs["Roughness"].default_value = rough
+    b_.inputs["Metallic"].default_value = metal
+    return m
 
 
 def select_only(obj):
@@ -68,7 +69,7 @@ def bm_to_object(bm, name, location=(0, 0, 0)):
 
 
 def finalize_organic(obj, levels=2):
-    """Shade smooth + add and APPLY a Subdivision Surface modifier."""
+    """Shade smooth + apply Subdivision Surface."""
     select_only(obj)
     bpy.ops.object.shade_smooth()
     mod = obj.modifiers.new(name="Subsurf", type='SUBSURF')
@@ -88,19 +89,49 @@ def join_objects(objects, name):
     return bpy.context.active_object
 
 
-# --- primitive builders ----------------------------------------------------
+# ---------------------------------------------------------------------------
+# Mesh primitives
+# ---------------------------------------------------------------------------
 
-def tapered_cone_mesh(r_base, r_top, height, segments=16):
-    """Tapered cylinder (r_base at -height/2, r_top at +height/2)."""
+def ring_prism_mesh(rings):
+    """
+    Closed prism from a list of cross-section rings.
+    Each ring: list of (x, y, z).  All rings must have the same vertex count.
+    First ring  → bottom cap.  Last ring → top cap.
+    """
     bm = bmesh.new()
-    bmesh.ops.create_cone(
-        bm, cap_ends=True, cap_tris=False,
-        segments=segments, radius1=r_base, radius2=r_top, depth=height,
-    )
+    n = len(rings[0])
+    vr = [[bm.verts.new(Vector(p)) for p in ring] for ring in rings]
+    bm.verts.ensure_lookup_table()
+    for ri in range(len(vr) - 1):
+        a, b = vr[ri], vr[ri + 1]
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new([a[i], a[j], b[j], b[i]])
+    bm.faces.new(vr[0])
+    bm.faces.new(list(reversed(vr[-1])))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return bm
 
 
-def sphere_mesh(radius, u=20, v=12, scale=(1.0, 1.0, 1.0)):
+def ellipse_ring(cx, cy, z, rx, ry, n=14):
+    """Elliptical ring at world-Z z, centred at (cx, cy)."""
+    return [(cx + rx * math.cos(2 * math.pi * k / n),
+             cy + ry * math.sin(2 * math.pi * k / n),
+             z)
+            for k in range(n)]
+
+
+def tapered_cone_mesh(r_base, r_top, height, segments=16):
+    """r_base at local z = -height/2,  r_top at z = +height/2."""
+    bm = bmesh.new()
+    bmesh.ops.create_cone(bm, cap_ends=True, cap_tris=False,
+                          segments=segments,
+                          radius1=r_base, radius2=r_top, depth=height)
+    return bm
+
+
+def sphere_mesh(radius, u=16, v=10, scale=(1.0, 1.0, 1.0)):
     bm = bmesh.new()
     bmesh.ops.create_uvsphere(bm, u_segments=u, v_segments=v, radius=radius)
     if scale != (1.0, 1.0, 1.0):
@@ -108,56 +139,26 @@ def sphere_mesh(radius, u=20, v=12, scale=(1.0, 1.0, 1.0)):
     return bm
 
 
-def box_mesh(sx, sy, sz):
-    bm = bmesh.new()
-    bmesh.ops.create_cube(bm, size=1.0)
-    bmesh.ops.scale(bm, vec=Vector((sx, sy, sz)), verts=bm.verts)
-    return bm
-
-
-def ring_prism_mesh(rings):
-    """
-    Closed prism from a list of cross-section rings.
-    Each ring is a list of (x, y, z) tuples; all rings share the same count.
-    First ring = start cap, last ring = end cap.
-    """
-    bm = bmesh.new()
-    n = len(rings[0])
-    vert_rings = []
-    for ring in rings:
-        vert_rings.append([bm.verts.new(Vector(p)) for p in ring])
-    bm.verts.ensure_lookup_table()
-
-    for ri in range(len(vert_rings) - 1):
-        a, b = vert_rings[ri], vert_rings[ri + 1]
-        for i in range(n):
-            j = (i + 1) % n
-            bm.faces.new([a[i], a[j], b[j], b[i]])
-
-    bm.faces.new(vert_rings[0])
-    bm.faces.new(list(reversed(vert_rings[-1])))
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-    return bm
-
-
 # ===========================================================================
-# Materials (Napoleonic British line infantry palette)
+# Materials  (Napoleonic British line infantry palette)
 # ===========================================================================
 MAT = {}
 
 
 def build_materials():
-    MAT["coat"]     = make_material("BritInf_Coat",     0.58, 0.05, 0.05)  # scarlet
-    MAT["facing"]   = make_material("BritInf_Facing",   0.90, 0.88, 0.82)  # buff/white lapels & cuffs
-    MAT["trousers"] = make_material("BritInf_Trousers", 0.62, 0.62, 0.60)  # grey overalls
-    MAT["gaiter"]   = make_material("BritInf_Gaiter",   0.07, 0.07, 0.07)  # black gaiters
-    MAT["shako"]    = make_material("BritInf_Shako",    0.05, 0.05, 0.05)  # black felt
-    MAT["skin"]     = make_material("BritInf_Skin",     0.80, 0.61, 0.47)
-    MAT["brass"]    = make_material("BritInf_Brass",    0.74, 0.56, 0.11, rough=0.35, metal=0.9)
-    MAT["belt"]     = make_material("BritInf_Crossbelt",0.93, 0.91, 0.86)  # pipe-clayed white
-    MAT["boot"]     = make_material("BritInf_Boot",     0.06, 0.06, 0.06)
-    MAT["wood"]     = make_material("Musket_Wood",      0.34, 0.19, 0.09)
-    MAT["steel"]    = make_material("Musket_Steel",     0.30, 0.31, 0.33, rough=0.3, metal=0.9)
+    MAT["coat"]     = make_material("BritInf_Coat",      0.58, 0.05, 0.05)
+    MAT["facing"]   = make_material("BritInf_Facing",    0.90, 0.88, 0.82)
+    MAT["trousers"] = make_material("BritInf_Trousers",  0.62, 0.62, 0.60)
+    MAT["gaiter"]   = make_material("BritInf_Gaiter",    0.07, 0.07, 0.07)
+    MAT["shako"]    = make_material("BritInf_Shako",     0.05, 0.05, 0.05)
+    MAT["skin"]     = make_material("BritInf_Skin",      0.80, 0.61, 0.47)
+    MAT["brass"]    = make_material("BritInf_Brass",     0.74, 0.56, 0.11,
+                                    rough=0.35, metal=0.9)
+    MAT["belt"]     = make_material("BritInf_Crossbelt", 0.93, 0.91, 0.86)
+    MAT["boot"]     = make_material("BritInf_Boot",      0.06, 0.06, 0.06)
+    MAT["wood"]     = make_material("Musket_Wood",       0.34, 0.19, 0.09)
+    MAT["steel"]    = make_material("Musket_Steel",      0.30, 0.31, 0.33,
+                                    rough=0.3, metal=0.9)
 
 
 def mat(obj, key):
@@ -166,45 +167,49 @@ def mat(obj, key):
 
 
 # ===========================================================================
-# Skeleton landmarks (metres, Z=0 at ground)
+# Skeleton dimensions  (metres, Z = 0 at ground)
 # ===========================================================================
+# Target body height ≈ 1.75 m (without shako).  Arms per requirements.
+
 FOOT_SZ     = 0.060
-LOWER_LEG_H = 0.40
-UPPER_LEG_H = 0.40
-TORSO_H     = 0.50
+LOWER_LEG_H = 0.36
+UPPER_LEG_H = 0.38
+TORSO_H     = 0.48
 NECK_H      = 0.085
 HEAD_R      = 0.115
 
-ANKLE_Z    = FOOT_SZ
-KNEE_Z     = ANKLE_Z + LOWER_LEG_H          # 0.46
-HIP_Z      = KNEE_Z + UPPER_LEG_H           # 0.86
-TORSO_Z    = HIP_Z + TORSO_H / 2            # 1.11
-SHOULDER_Z = HIP_Z + TORSO_H                # 1.36
-NECK_Z     = SHOULDER_Z + NECK_H / 2        # 1.4025
-HEAD_Z     = SHOULDER_Z + NECK_H + HEAD_R * 0.85   # ~1.543
-
-# Torso cross-section half-extents at each height (for profile sampling)
-# (z_world, half_width, half_depth)
-TORSO_PROFILE = [
-    (SHOULDER_Z,        0.205, 0.135),   # shoulders (broad)
-    (SHOULDER_Z - 0.13, 0.190, 0.130),   # chest
-    (TORSO_Z,           0.160, 0.115),   # waist (cinched)
-    (HIP_Z + 0.04,      0.180, 0.120),   # hips
-    (HIP_Z,             0.175, 0.118),   # hip bottom
-]
+ANKLE_Z    = FOOT_SZ                            # 0.060
+KNEE_Z     = ANKLE_Z    + LOWER_LEG_H           # 0.420
+HIP_Z      = KNEE_Z     + UPPER_LEG_H           # 0.800
+TORSO_Z    = HIP_Z      + TORSO_H / 2           # 1.040  torso centre
+SHOULDER_Z = HIP_Z      + TORSO_H               # 1.280
+NECK_Z     = SHOULDER_Z + NECK_H / 2            # 1.3225
+HEAD_Z     = SHOULDER_Z + NECK_H + HEAD_R * 0.85  # ≈ 1.463
 
 HIP_OFFSET_X = 0.095
 UPPER_ARM_H  = 0.28
-LOWER_ARM_H  = 0.25
+LOWER_ARM_H  = 0.24
+
+# Torso profile table: (z_world, half_width_x, half_depth_y)
+# Used for surface-projection by belts, lapels and coat tails.
+TORSO_CROSS = [
+    (SHOULDER_Z,          0.230, 0.150),   # shoulder top
+    (SHOULDER_Z - 0.06,   0.220, 0.144),   # upper chest
+    (SHOULDER_Z - 0.12,   0.208, 0.138),   # chest
+    (SHOULDER_Z - 0.20,   0.190, 0.128),   # lower chest
+    (TORSO_Z    + 0.06,   0.174, 0.118),   # above waist
+    (TORSO_Z,             0.168, 0.114),   # waist (narrowest)
+    (TORSO_Z    - 0.06,   0.172, 0.116),   # below waist
+    (HIP_Z      + 0.10,   0.180, 0.120),   # upper hip
+    (HIP_Z,               0.178, 0.118),   # hip bottom
+]
 
 
 def torso_profile(z):
-    """Interpolate (half_width, half_depth) of the torso at world Z."""
-    pts = TORSO_PROFILE
-    if z >= pts[0][0]:
-        return pts[0][1], pts[0][2]
-    if z <= pts[-1][0]:
-        return pts[-1][1], pts[-1][2]
+    """Return (half_width, half_depth) of the torso ellipse at world Z."""
+    pts = TORSO_CROSS
+    if z >= pts[0][0]:  return pts[0][1], pts[0][2]
+    if z <= pts[-1][0]: return pts[-1][1], pts[-1][2]
     for i in range(len(pts) - 1):
         z0, w0, d0 = pts[i]
         z1, w1, d1 = pts[i + 1]
@@ -215,20 +220,12 @@ def torso_profile(z):
 
 
 # ===========================================================================
-# Torso, coat tails, lapels, epaulettes
+# TORSO  —  9 elliptical sections
 # ===========================================================================
 
 def make_torso():
-    """Dense trapezoid prism following TORSO_PROFILE; subdivided into a body."""
-    rings = []
-    seg = 12  # angular resolution of the cross-section
-    for z, hw, hd in TORSO_PROFILE:
-        ring = []
-        for k in range(seg):
-            a = 2 * math.pi * k / seg
-            # Rounded-rectangle-ish cross section via ellipse
-            ring.append((hw * math.cos(a), hd * math.sin(a), z))
-        rings.append(ring)
+    N = 16
+    rings = [ellipse_ring(0, 0, z, hw, hd, n=N) for z, hw, hd in TORSO_CROSS]
     bm = ring_prism_mesh(rings)
     obj = bm_to_object(bm, "Torso", (0, 0, 0))
     mat(obj, "coat")
@@ -236,110 +233,90 @@ def make_torso():
     return obj
 
 
+# ===========================================================================
+# COAT TAILS  —  thin flat fabric panels, not pillars
+# ===========================================================================
+
 def make_coat_tails():
     """
-    Rear & side coat tails hanging from the waist down over the thighs,
-    with the classic turned-back fronts (white facing inside edge).
+    Two rear tails running from the waist hem down to just above the knee.
+    Cross-section per ring is a flat rectangle (11 mm thick) whose back face
+    tracks the torso's back surface via torso_profile().
     """
     parts = []
-    top_z = HIP_Z + 0.06
-    bot_z = KNEE_Z + 0.10          # falls to just above the knee
-    back_y = -torso_profile(HIP_Z)[1] - 0.005
+    top_z   = HIP_Z + 0.08
+    bot_z   = KNEE_Z + 0.14
+    n_steps = 6
 
-    # Two main rear tails (left & right of centre back)
     for sign in (+1, -1):
-        x_in  = sign * 0.02
-        x_out = sign * 0.16
-        th    = 0.018
         rings = []
-        # top (at waist, tucked in) -> bottom (flared out)
-        steps = 4
-        for s in range(steps + 1):
-            t = s / steps
-            z = top_z + (bot_z - top_z) * t
-            flare = 1.0 + 0.45 * t          # tails splay outward at the hem
-            y = back_y - 0.02 * t           # drift backward toward the hem
-            xi = x_in * flare
-            xo = x_out * flare
+        for s in range(n_steps + 1):
+            t      = s / n_steps
+            z      = top_z + (bot_z - top_z) * t
+            x_in   = sign * (0.015 + 0.008 * t)    # inner edge, slowly widens
+            x_out  = sign * (0.130 + 0.055 * t)    # outer edge flares at hem
+            _, hd  = torso_profile(z)
+            y_back  = -(hd + 0.004)                # just outside the torso back
+            y_front = y_back - 0.011               # 11 mm thick — fabric
             rings.append([
-                (xi, y + th, z),
-                (xo, y + th, z),
-                (xo, y - th, z),
-                (xi, y - th, z),
+                (x_in,  y_front, z),
+                (x_out, y_front, z),
+                (x_out, y_back,  z),
+                (x_in,  y_back,  z),
             ])
         bm = ring_prism_mesh(rings)
-        tail = bm_to_object(bm, f"CoatTail_{'L' if sign>0 else 'R'}", (0, 0, 0))
-        mat(tail, "coat")
-        finalize_organic(tail, levels=2)
-        parts.append(tail)
-
-    # Side skirt panels (cover the hips, blending the coat over the thighs)
-    for sign in (+1, -1):
-        hw, hd = torso_profile(HIP_Z)
-        cx = sign * (hw - 0.01)
-        th = 0.02
-        rings = []
-        steps = 4
-        for s in range(steps + 1):
-            t = s / steps
-            z = top_z + (bot_z + 0.02 - top_z) * t
-            depth = hd * (1.0 + 0.15 * t)
-            rings.append([
-                (cx + sign * th, depth, z),
-                (cx + sign * th, -depth, z),
-                (cx - sign * th, -depth, z),
-                (cx - sign * th, depth, z),
-            ])
-        bm = ring_prism_mesh(rings)
-        skirt = bm_to_object(bm, f"CoatSkirt_{'L' if sign>0 else 'R'}", (0, 0, 0))
-        mat(skirt, "coat")
-        finalize_organic(skirt, levels=2)
-        parts.append(skirt)
+        obj = bm_to_object(bm, f"CoatTail_{'L' if sign > 0 else 'R'}", (0, 0, 0))
+        mat(obj, "coat")
+        finalize_organic(obj, levels=1)
+        parts.append(obj)
 
     return parts
 
 
+# ===========================================================================
+# LAPELS + COLLAR
+# ===========================================================================
+
 def make_lapels():
     """
-    Two coloured lapels (plastron) on the chest front + a row of brass buttons.
-    The lapels sit proud of the coat and flare open toward the shoulders.
+    Two facing-colour plastron strips on the chest front.
+    Each strip is projected off the torso ellipse surface (+5 mm stand-off).
     """
     parts = []
-    z_top = SHOULDER_Z - 0.03
-    z_bot = TORSO_Z + 0.02
+    z_top   = SHOULDER_Z - 0.04
+    z_bot   = TORSO_Z    + 0.04
+    n_steps = 4
 
     for sign in (+1, -1):
         rings = []
-        steps = 3
-        for s in range(steps + 1):
-            t = s / steps
-            z = z_top + (z_bot - z_top) * t
-            hw, hd = torso_profile(z)
-            # wider apart at the top (open V), closer at the waist
-            x_in  = sign * (0.015 + 0.005 * (1 - t))
-            x_out = sign * (0.085 - 0.015 * t)
-            y_surf = hd + 0.004
-            th = 0.012
+        for s in range(n_steps + 1):
+            t     = s / n_steps
+            z     = z_top + (z_bot - z_top) * t
+            _, hd = torso_profile(z)
+            x_in  = sign * (0.014 + 0.005 * (1 - t))
+            x_out = sign * (0.076 - 0.012 * t)
+            y_s   = hd + 0.005
+            th    = 0.010
             rings.append([
-                (x_in,  y_surf + th, z),
-                (x_out, y_surf + th, z),
-                (x_out, y_surf,      z),
-                (x_in,  y_surf,      z),
+                (x_in,  y_s + th, z),
+                (x_out, y_s + th, z),
+                (x_out, y_s,      z),
+                (x_in,  y_s,      z),
             ])
         bm = ring_prism_mesh(rings)
-        lap = bm_to_object(bm, f"Lapel_{'L' if sign>0 else 'R'}", (0, 0, 0))
-        mat(lap, "facing")
-        finalize_organic(lap, levels=2)
-        parts.append(lap)
+        obj = bm_to_object(bm, f"Lapel_{'L' if sign > 0 else 'R'}", (0, 0, 0))
+        mat(obj, "facing")
+        finalize_organic(obj, levels=1)
+        parts.append(obj)
 
-    # Brass button rows (down each lapel inner edge)
+    # Brass button rows
     for sign in (+1, -1):
         for s in range(6):
-            t = s / 5
-            z = z_top + (z_bot - z_top) * t
-            hw, hd = torso_profile(z)
-            bm = sphere_mesh(0.011, u=10, v=8)
-            btn = bm_to_object(bm, "Button", (sign * 0.02, hd + 0.018, z))
+            t     = s / 5
+            z     = z_top + (z_bot - z_top) * t
+            _, hd = torso_profile(z)
+            bm    = sphere_mesh(0.010, u=10, v=8)
+            btn   = bm_to_object(bm, "Button", (sign * 0.017, hd + 0.017, z))
             mat(btn, "brass")
             select_only(btn)
             bpy.ops.object.shade_smooth()
@@ -349,172 +326,123 @@ def make_lapels():
 
 
 def make_collar():
-    """Standing collar (facing colour) wrapping the neck base."""
-    z = SHOULDER_Z + 0.01
-    bm = tapered_cone_mesh(r_base=0.085, r_top=0.075, height=0.07, segments=16)
-    obj = bm_to_object(bm, "Collar", (0, 0.01, z + 0.02))
+    """Standing facing-colour collar at the neck base."""
+    bm  = tapered_cone_mesh(r_base=0.080, r_top=0.068, height=0.062, segments=16)
+    obj = bm_to_object(bm, "Collar", (0, 0.010, SHOULDER_Z + 0.020))
     mat(obj, "facing")
     finalize_organic(obj, levels=1)
     return obj
 
 
 # ===========================================================================
-# Head / neck / shako
+# HEAD  —  ring_prism_mesh with 9 anatomical sections (chin → crown)
 # ===========================================================================
 
+def make_head():
+    """
+    Each ring captures a key skull level: chin tip, jaw, cheekbones, temples
+    (widest), parietal, crown apex.  cy_offset shifts each ring's centre
+    forward in +Y to give a face projection (the face is not a perfect cylinder).
+    Subdivision Level 2 fuses everything into a smooth, recognisably human head.
+    """
+    N       = 16
+    BOT     = HEAD_Z - HEAD_R * 1.05   # chin level
+    TOP     = HEAD_Z + HEAD_R * 0.95   # crown level
+
+    # (z, rx, ry, cy_offset)
+    sects = [
+        (BOT,                      0.036, 0.030, -0.010),  # chin tip
+        (BOT + HEAD_R * 0.22,      0.080, 0.068, -0.005),  # jaw
+        (BOT + HEAD_R * 0.50,      0.102, 0.088,  0.000),  # cheekbones
+        (BOT + HEAD_R * 0.72,      0.108, 0.095,  0.005),  # upper cheek
+        (BOT + HEAD_R * 0.95,      0.110, 0.097,  0.004),  # temples — widest
+        (BOT + HEAD_R * 1.30,      0.106, 0.094,  0.000),  # parietal
+        (BOT + HEAD_R * 1.60,      0.094, 0.088, -0.004),  # upper parietal
+        (TOP - HEAD_R * 0.15,      0.066, 0.062, -0.006),  # crown
+        (TOP,                      0.030, 0.028, -0.006),  # apex
+    ]
+    rings = [ellipse_ring(0, cy, z, rx, ry, n=N) for z, rx, ry, cy in sects]
+    bm  = ring_prism_mesh(rings)
+    obj = bm_to_object(bm, "Head", (0, 0, 0))
+    mat(obj, "skin")
+    finalize_organic(obj, levels=2)
+    return obj
+
+
 def make_neck():
-    bm = tapered_cone_mesh(r_base=0.058, r_top=0.046, height=NECK_H + 0.03, segments=14)
+    bm  = tapered_cone_mesh(r_base=0.054, r_top=0.042, height=NECK_H + 0.025,
+                             segments=14)
     obj = bm_to_object(bm, "Neck", (0, 0, NECK_Z))
     mat(obj, "skin")
     finalize_organic(obj, levels=2)
     return obj
 
 
-def make_head():
-    """
-    Sphere reshaped into a head: narrowed at the crown, extruded jaw/chin
-    at the bottom-front so the face reads with a jawline rather than a ball.
-    """
-    bm = bmesh.new()
-    bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=16, radius=HEAD_R)
-    # Slightly narrow the skull front-back, keep height
-    bmesh.ops.scale(bm, vec=Vector((0.95, 0.92, 1.05)), verts=bm.verts)
-
-    # Sculpt a jaw: pull lower-front verts forward (+Y) and inward toward a chin
-    for vrt in bm.verts:
-        co = vrt.co
-        if co.z < -0.02:                       # lower half of the head
-            jaw_t = min(1.0, (-co.z) / HEAD_R)  # 0 at mid, 1 at bottom
-            if co.y > 0:                       # front-facing -> build the chin
-                co.y += 0.025 * jaw_t
-            # taper the jaw inward in X so it narrows to a chin
-            co.x *= (1.0 - 0.18 * jaw_t)
-            co.z *= (1.0 + 0.05 * jaw_t)       # lengthen the jaw downward a touch
-    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-
-    obj = bm_to_object(bm, "Head", (0, 0, HEAD_Z))
-    mat(obj, "skin")
-    finalize_organic(obj, levels=2)
-    return obj
-
-
-def make_shako():
-    """
-    Belgic ('false-front') shako: cylindrical felt body flaring WIDER at the
-    top, a flat raised false front, a peaked leather visor at the front, plus
-    a brass plate, cords and a tuft/plume.
-    """
-    parts = []
-    body_h = 0.20
-    bot_z  = HEAD_Z + HEAD_R * 0.78
-    cz     = bot_z + body_h / 2
-
-    # Body — narrower at the head, wider at the crown (the signature flare)
-    bm = tapered_cone_mesh(r_base=0.098, r_top=0.120, height=body_h, segments=20)
-    body = bm_to_object(bm, "Shako_body", (0, 0, cz))
-    mat(body, "shako")
-    finalize_organic(body, levels=2)
-    parts.append(body)
-
-    # Raised false front (Belgic plate backing) at the top front
-    bm_ff = box_mesh(0.18, 0.02, 0.07)
-    ff = bm_to_object(bm_ff, "Shako_falsefront", (0, 0.108, bot_z + body_h - 0.02))
-    mat(ff, "shako")
-    finalize_organic(ff, levels=1)
-    parts.append(ff)
-
-    # Peak / visor — a flattened, downward-angled disc segment at the front
-    bm_peak = bmesh.new()
-    bmesh.ops.create_cone(bm_peak, cap_ends=True, cap_tris=False,
-                          segments=18, radius1=0.135, radius2=0.135, depth=0.022)
-    bmesh.ops.scale(bm_peak, vec=Vector((1.0, 1.25, 1.0)), verts=bm_peak.verts)
-    peak = bm_to_object(bm_peak, "Shako_peak", (0, 0.06, bot_z + 0.012))
-    peak.rotation_euler = (math.radians(-16), 0, 0)
-    mat(peak, "shako")
-    finalize_organic(peak, levels=1)
-    parts.append(peak)
-
-    # Brass plate on the false front
-    bm_plate = box_mesh(0.085, 0.012, 0.075)
-    plate = bm_to_object(bm_plate, "Shako_plate", (0, 0.122, bot_z + body_h - 0.03))
-    mat(plate, "brass")
-    finalize_organic(plate, levels=1)
-    parts.append(plate)
-
-    # Tuft / plume on top
-    bm_tuft = tapered_cone_mesh(r_base=0.028, r_top=0.018, height=0.10, segments=12)
-    tuft = bm_to_object(bm_tuft, "Shako_tuft", (0, 0.02, bot_z + body_h + 0.05))
-    mat(tuft, "facing")
-    finalize_organic(tuft, levels=1)
-    parts.append(tuft)
-
-    return parts
-
-
 # ===========================================================================
-# Arms (with spherical shoulder/elbow joints, cuffs, epaulettes, hands)
+# ARMS  —  ONE ring_prism_mesh per arm, shoulder cap → wrist
 # ===========================================================================
 
 def make_arm(side):
+    """
+    The full arm is a single continuous ring_prism_mesh. Radii at each
+    section define:
+      shoulder cap (wide) → deltoid → upper arm taper → lower upper arm →
+      elbow bulge (olecranon) → forearm → forearm taper → wrist.
+
+    No ShoulderJoint or ElbowJoint objects.  Subdivision Level 2 makes the
+    surface flow organically through the joint areas.
+    """
     parts = []
     sign  = 1 if side == 'L' else -1
-    arm_x = sign * (TORSO_PROFILE[0][1] + 0.03)
+    # arm centre: slightly inside the shoulder edge → looks embedded, not floating
+    arm_x = sign * (TORSO_CROSS[0][1] - 0.008)   # ≈ ±0.222
 
-    shoulder_z = SHOULDER_Z - 0.01
-    elbow_z    = shoulder_z - UPPER_ARM_H
-    wrist_z    = elbow_z - LOWER_ARM_H
+    shoulder_top = SHOULDER_Z - 0.010
+    elbow_z      = shoulder_top - UPPER_ARM_H
+    wrist_z      = elbow_z - LOWER_ARM_H
+    N = 14
 
-    # --- Shoulder ball joint (fills the deltoid, blends into torso) ---
-    bm = sphere_mesh(0.072, u=18, v=12)
-    shoulder = bm_to_object(bm, f"ShoulderJoint_{side}", (arm_x, 0, shoulder_z))
-    mat(shoulder, "coat")
-    finalize_organic(shoulder, levels=2)
-    parts.append(shoulder)
+    # sections from shoulder (high Z) down to wrist (low Z)
+    # (z,                    rx,    ry)
+    sects = [
+        (shoulder_top,          0.072, 0.066),  # shoulder cap
+        (shoulder_top - 0.040,  0.070, 0.064),  # deltoid
+        (shoulder_top - 0.100,  0.062, 0.057),  # upper arm
+        (shoulder_top - 0.180,  0.056, 0.052),  # mid upper arm
+        (elbow_z      + 0.050,  0.052, 0.048),  # lower upper arm
+        (elbow_z,               0.060, 0.054),  # elbow / olecranon bulge
+        (elbow_z      - 0.020,  0.052, 0.047),  # just below elbow
+        (elbow_z      - 0.080,  0.050, 0.046),  # upper forearm
+        (elbow_z      - 0.150,  0.046, 0.043),  # mid forearm
+        (elbow_z      - 0.200,  0.042, 0.039),  # lower forearm
+        (wrist_z      + 0.025,  0.038, 0.035),  # pre-wrist
+        (wrist_z,               0.034, 0.032),  # wrist
+    ]
 
-    # --- Upper arm (tapered) ---
-    bm = tapered_cone_mesh(r_base=0.050, r_top=0.064, height=UPPER_ARM_H, segments=16)
-    uarm = bm_to_object(bm, f"UpperArm_{side}", (arm_x, 0, shoulder_z - UPPER_ARM_H / 2))
-    mat(uarm, "coat")
-    finalize_organic(uarm, levels=2)
-    parts.append(uarm)
+    rings = [ellipse_ring(arm_x, 0, z, rx, ry, n=N) for z, rx, ry in sects]
+    bm    = ring_prism_mesh(rings)
+    arm_obj = bm_to_object(bm, f"Arm_{side}", (0, 0, 0))
+    mat(arm_obj, "coat")
+    finalize_organic(arm_obj, levels=2)
+    parts.append(arm_obj)
 
-    # --- Elbow ball joint ---
-    bm = sphere_mesh(0.050, u=16, v=10)
-    elbow = bm_to_object(bm, f"ElbowJoint_{side}", (arm_x, 0, elbow_z))
-    mat(elbow, "coat")
-    finalize_organic(elbow, levels=2)
-    parts.append(elbow)
-
-    # --- Lower arm (tapered) ---
-    bm = tapered_cone_mesh(r_base=0.036, r_top=0.048, height=LOWER_ARM_H, segments=16)
-    larm = bm_to_object(bm, f"LowerArm_{side}", (arm_x, 0, elbow_z - LOWER_ARM_H / 2))
-    mat(larm, "coat")
-    finalize_organic(larm, levels=2)
-    parts.append(larm)
-
-    # --- Cuff (thick facing-colour band at the wrist) ---
-    bm = tapered_cone_mesh(r_base=0.052, r_top=0.046, height=0.06, segments=16)
-    cuff = bm_to_object(bm, f"Cuff_{side}", (arm_x, 0, wrist_z + 0.03))
+    # Cuff — facing colour, separate object at the wrist
+    bm2  = tapered_cone_mesh(r_base=0.048, r_top=0.042, height=0.055, segments=16)
+    cuff = bm_to_object(bm2, f"Cuff_{side}", (arm_x, 0, wrist_z + 0.022))
     mat(cuff, "facing")
     finalize_organic(cuff, levels=2)
     parts.append(cuff)
 
-    # --- Epaulette / shoulder strap (rolled fabric over the shoulder top) ---
-    bm = sphere_mesh(0.055, u=14, v=10, scale=(1.4, 0.7, 0.5))
-    ep = bm_to_object(bm, f"Epaulette_{side}", (arm_x, 0, shoulder_z + 0.055))
+    # Epaulette — flattened blob sitting on the shoulder cap
+    bm3 = sphere_mesh(0.052, u=14, v=10, scale=(1.40, 0.68, 0.48))
+    ep  = bm_to_object(bm3, f"Epaulette_{side}", (arm_x, 0, shoulder_top + 0.048))
     mat(ep, "facing")
     finalize_organic(ep, levels=2)
     parts.append(ep)
-    # brass wing tuft at the outer edge of the epaulette
-    bm = sphere_mesh(0.02, u=10, v=8)
-    tuft = bm_to_object(bm, f"EpTuft_{side}", (arm_x + sign * 0.05, 0, shoulder_z + 0.05))
-    mat(tuft, "brass")
-    select_only(tuft); bpy.ops.object.shade_smooth()
-    parts.append(tuft)
 
-    # --- Hand (sphere flattened into a mitten/fist) ---
-    bm = sphere_mesh(0.045, u=14, v=10, scale=(0.85, 0.7, 1.25))
-    hand = bm_to_object(bm, f"Hand_{side}", (arm_x, 0, wrist_z - 0.05))
+    # Hand — fist shape from a flattened sphere
+    bm4  = sphere_mesh(0.040, u=14, v=10, scale=(0.82, 0.68, 1.20))
+    hand = bm_to_object(bm4, f"Hand_{side}", (arm_x, 0, wrist_z - 0.045))
     mat(hand, "skin")
     finalize_organic(hand, levels=2)
     parts.append(hand)
@@ -523,69 +451,86 @@ def make_arm(side):
 
 
 # ===========================================================================
-# Legs (hip/knee ball joints, thigh, shin/gaiter, boot)
+# LEGS  —  thigh + shin with a SHARED knee ring (no ball joint)
 # ===========================================================================
 
 def make_leg(side):
+    """
+    Thigh and shin are separate meshes for material purposes (trousers /
+    gaiter), but their rings at KNEE_Z are IDENTICAL in (x,y), so the two
+    subdivided surfaces meet flush — no visible ball or gap at the knee.
+    """
     parts = []
     sign  = 1 if side == 'L' else -1
     hip_x = sign * HIP_OFFSET_X
+    N     = 14
 
-    # --- Hip / pelvis ball joint ---
-    bm = sphere_mesh(0.085, u=18, v=12)
-    hip = bm_to_object(bm, f"HipJoint_{side}", (hip_x, 0, HIP_Z - 0.02))
-    mat(hip, "trousers")
-    finalize_organic(hip, levels=2)
-    parts.append(hip)
-
-    # --- Thigh (tapered: wide at hip, narrow at knee) ---
-    bm = tapered_cone_mesh(r_base=0.058, r_top=0.088, height=UPPER_LEG_H, segments=16)
-    thigh = bm_to_object(bm, f"Thigh_{side}", (hip_x, 0, KNEE_Z + UPPER_LEG_H / 2))
+    # ---- THIGH  (hip → knee, trousers) ----
+    # Top ring is wide to partially embed into the torso bottom.
+    # Bottom ring at KNEE_Z is the SHARED ring — must match shin top.
+    thigh_sects = [
+        (HIP_Z,             0.095, 0.090),  # hip top — overlaps torso hip
+        (HIP_Z - 0.040,     0.088, 0.083),  # upper thigh
+        (HIP_Z - 0.120,     0.078, 0.074),  # mid thigh
+        (HIP_Z - 0.240,     0.066, 0.063),  # lower thigh
+        (KNEE_Z + 0.060,    0.063, 0.060),  # just above knee
+        (KNEE_Z,            0.070, 0.066),  # SHARED knee ring ← matches shin[0]
+    ]
+    rings  = [ellipse_ring(hip_x, 0, z, rx, ry, n=N) for z, rx, ry in thigh_sects]
+    bm     = ring_prism_mesh(rings)
+    thigh  = bm_to_object(bm, f"Thigh_{side}", (0, 0, 0))
     mat(thigh, "trousers")
     finalize_organic(thigh, levels=2)
     parts.append(thigh)
 
-    # --- Knee ball joint ---
-    bm = sphere_mesh(0.055, u=16, v=10)
-    knee = bm_to_object(bm, f"KneeJoint_{side}", (hip_x, 0, KNEE_Z))
-    mat(knee, "trousers")
-    finalize_organic(knee, levels=2)
-    parts.append(knee)
-
-    # --- Shin / gaiter (black, tapered to ankle) ---
-    bm = tapered_cone_mesh(r_base=0.040, r_top=0.062, height=LOWER_LEG_H, segments=16)
-    shin = bm_to_object(bm, f"Shin_{side}", (hip_x, 0, ANKLE_Z + LOWER_LEG_H / 2))
+    # ---- SHIN / GAITER  (knee → ankle, black gaiter) ----
+    # sects[0] must match thigh sects[-1] exactly: (KNEE_Z, 0.070, 0.066)
+    shin_sects = [
+        (KNEE_Z,            0.070, 0.066),  # SHARED knee ring ← matches thigh[-1]
+        (KNEE_Z - 0.040,    0.067, 0.063),  # just below knee
+        (KNEE_Z - 0.100,    0.072, 0.068),  # calf belly (gastrocnemius)
+        (KNEE_Z - 0.200,    0.064, 0.060),  # mid calf
+        (KNEE_Z - 0.280,    0.050, 0.048),  # tapering shin
+        (ANKLE_Z + 0.040,   0.042, 0.040),  # lower shin
+        (ANKLE_Z,           0.038, 0.036),  # ankle
+    ]
+    rings  = [ellipse_ring(hip_x, 0, z, rx, ry, n=N) for z, rx, ry in shin_sects]
+    bm     = ring_prism_mesh(rings)
+    shin   = bm_to_object(bm, f"Shin_{side}", (0, 0, 0))
     mat(shin, "gaiter")
     finalize_organic(shin, levels=2)
     parts.append(shin)
 
-    # --- Boot ---
     parts.append(make_boot(side))
     return parts
 
 
 def make_boot(side):
-    """Rounded boot: a 6-section prism (heel->ball->toe) subdivided smooth."""
+    """
+    7-sided boot prism: two heel verts, two ball verts, rounded toe.
+    Object origin at ankle level so it sits cleanly on the ground.
+    """
     sign  = 1 if side == 'L' else -1
     hip_x = sign * HIP_OFFSET_X
 
-    hw, fw = 0.040, 0.046
-    heel_y, ball_y, toe_y = -0.035, 0.020, 0.125
-    top_z, sole_z = FOOT_SZ / 2, -FOOT_SZ / 2
+    hw, fw          = 0.040, 0.046
+    heel_y, ball_y  = -0.034, 0.022
+    toe_y           = 0.125
+    top_z, sole_z   = FOOT_SZ / 2, -FOOT_SZ / 2
 
     cross = [
-        (-hw, heel_y),
-        ( hw, heel_y),
-        ( fw, ball_y),
-        ( fw * 0.6, toe_y * 0.85),
-        ( 0, toe_y),
-        (-fw * 0.6, toe_y * 0.85),
-        (-fw, ball_y),
+        (-hw,        heel_y),
+        ( hw,        heel_y),
+        ( fw,        ball_y),
+        ( fw * 0.60, toe_y * 0.88),
+        ( 0,         toe_y),
+        (-fw * 0.60, toe_y * 0.88),
+        (-fw,        ball_y),
     ]
-    top = [(x, y, top_z) for x, y in cross]
+    top = [(x, y, top_z)  for x, y in cross]
     bot = [(x, y, sole_z) for x, y in cross]
-    bm = ring_prism_mesh([bot, top])
 
+    bm  = ring_prism_mesh([bot, top])
     obj = bm_to_object(bm, f"Boot_{side}", (hip_x, 0.0, ANKLE_Z - FOOT_SZ / 2))
     mat(obj, "boot")
     finalize_organic(obj, levels=2)
@@ -593,104 +538,163 @@ def make_boot(side):
 
 
 # ===========================================================================
-# Cross-belts (conform to the chest curvature)
+# CROSS-BELTS  —  narrow straps projected onto the torso ellipse
 # ===========================================================================
 
 def make_crossbelts():
     """
-    Two white belts running shoulder->opposite hip, each vertex projected
-    onto the torso's elliptical surface so the strap hugs the chest instead
-    of floating as a flat box.
+    Each belt is parametrised as a diagonal line in the X-Z plane; at every
+    sample the belt edge X coordinates are projected onto the front surface of
+    the torso ellipse so the strap hugs the chest.
+    width=38 mm, thick=8 mm (thinner than previous version).
     """
     parts = []
 
-    def belt(name, x0, z0, x1, z1, width=0.05, thick=0.014):
-        steps = 16
-        centres = []
-        for s in range(steps + 1):
-            t = s / steps
-            x = x0 + (x1 - x0) * t
-            z = z0 + (z1 - z0) * t
-            centres.append((x, z))
-
+    def belt(name, x0, z0, x1, z1, width=0.038, thick=0.008):
+        steps   = 20
+        centres = [(x0 + (x1 - x0) * s / steps,
+                    z0 + (z1 - z0) * s / steps)
+                   for s in range(steps + 1)]
         rings = []
         for i, (x, z) in enumerate(centres):
-            # travel direction in the X-Z plane
             if i < len(centres) - 1:
-                dx = centres[i + 1][0] - x
-                dz = centres[i + 1][1] - z
+                dx, dz = centres[i + 1][0] - x, centres[i + 1][1] - z
             else:
-                dx = x - centres[i - 1][0]
-                dz = z - centres[i - 1][1]
-            L = math.hypot(dx, dz) or 1e-6
-            # perpendicular (width) axis in X-Z
-            px, pz = -dz / L, dx / L
-            hw_belt = width / 2
-
+                dx, dz = x - centres[i - 1][0], z - centres[i - 1][1]
+            L  = math.hypot(dx, dz) or 1e-6
+            px, pz = -dz / L, dx / L            # perpendicular in X-Z
+            hw_b = width / 2
             ring = []
-            for wsign in (+1, -1):
-                ex = x + px * hw_belt * wsign
-                ez = z + pz * hw_belt * wsign
-                half_w, half_d = torso_profile(ez)
-                # project X onto the ellipse to find the front surface Y
-                ratio = max(0.0, 1.0 - (ex / half_w) ** 2) if half_w else 0.0
-                y_surf = half_d * math.sqrt(ratio) + 0.006
-                ring.append((ex, y_surf + thick, ez))   # outer face
-                ring.append((ex, y_surf,         ez))   # inner face
-            # reorder to a consistent 4-vert loop: outer+, inner+, inner-, outer-
-            ordered = [ring[0], ring[1], ring[3], ring[2]]
-            rings.append(ordered)
+            for ws in (+1, -1):
+                ex = x  + px * hw_b * ws
+                ez = z  + pz * hw_b * ws
+                hw_t, hd_t = torso_profile(ez)
+                ratio  = max(0.0, 1.0 - (ex / hw_t) ** 2) if hw_t else 0.0
+                y_surf = hd_t * math.sqrt(ratio) + 0.004
+                ring.append((ex, y_surf + thick, ez))   # outer
+                ring.append((ex, y_surf,         ez))   # inner
+            rings.append([ring[0], ring[1], ring[3], ring[2]])
 
-        bm = ring_prism_mesh(rings)
+        bm  = ring_prism_mesh(rings)
         obj = bm_to_object(bm, name, (0, 0, 0))
         mat(obj, "belt")
         finalize_organic(obj, levels=1)
         return obj
 
-    sw = TORSO_PROFILE[0][1]
-    parts.append(belt("Belt_RtoL",  sw * 0.8, SHOULDER_Z - 0.02,
-                                    -sw * 0.7, HIP_Z + 0.06))
-    parts.append(belt("Belt_LtoR", -sw * 0.8, SHOULDER_Z - 0.02,
-                                     sw * 0.7, HIP_Z + 0.06))
+    sw = TORSO_CROSS[0][1]
+    parts.append(belt("Belt_RtoL",  sw * 0.78, SHOULDER_Z - 0.04,
+                                   -sw * 0.70, HIP_Z      + 0.06))
+    parts.append(belt("Belt_LtoR", -sw * 0.78, SHOULDER_Z - 0.04,
+                                    sw * 0.70, HIP_Z      + 0.06))
 
-    # Brass belt-plate where the belts cross
-    bm = sphere_mesh(0.03, u=14, v=10, scale=(1.0, 0.4, 1.0))
-    _, hd = torso_profile(TORSO_Z + 0.05)
-    plate = bm_to_object(bm, "Belt_plate", (0, hd + 0.02, TORSO_Z + 0.05))
-    mat(plate, "brass")
-    select_only(plate); bpy.ops.object.shade_smooth()
-    parts.append(plate)
+    # Brass belt plate where the straps cross
+    bm        = sphere_mesh(0.026, u=12, v=8, scale=(1.0, 0.40, 1.0))
+    _, hd     = torso_profile(TORSO_Z + 0.05)
+    belt_plate = bm_to_object(bm, "Belt_plate", (0, hd + 0.016, TORSO_Z + 0.05))
+    mat(belt_plate, "brass")
+    select_only(belt_plate)
+    bpy.ops.object.shade_smooth()
+    parts.append(belt_plate)
 
     return parts
 
 
 # ===========================================================================
-# Musket
+# SHAKO  —  r_base=0.095, r_top=0.125, height=0.21
+# ===========================================================================
+
+def make_shako():
+    """
+    Belgic false-front shako: body flares wider toward the crown,
+    with a peaked visor, false-front panel, brass plate and plume.
+    """
+    parts  = []
+    body_h = 0.21
+    bot_z  = HEAD_Z + HEAD_R * 0.80
+    cz     = bot_z  + body_h / 2
+
+    bm   = tapered_cone_mesh(r_base=0.095, r_top=0.125,
+                              height=body_h, segments=20)
+    body = bm_to_object(bm, "Shako_body", (0, 0, cz))
+    mat(body, "shako")
+    finalize_organic(body, levels=2)
+    parts.append(body)
+
+    # False front
+    bm_ff = bmesh.new()
+    bmesh.ops.create_cube(bm_ff, size=1.0)
+    bmesh.ops.scale(bm_ff, vec=Vector((0.185, 0.020, 0.072)), verts=bm_ff.verts)
+    ff = bm_to_object(bm_ff, "Shako_falsefront",
+                      (0, 0.112, bot_z + body_h - 0.022))
+    mat(ff, "shako")
+    finalize_organic(ff, levels=1)
+    parts.append(ff)
+
+    # Visor / peak — flat ellipse tilted downward at the front
+    bm_pk = bmesh.new()
+    bmesh.ops.create_cone(bm_pk, cap_ends=True, cap_tris=False,
+                          segments=18,
+                          radius1=0.132, radius2=0.132, depth=0.020)
+    bmesh.ops.scale(bm_pk, vec=Vector((1.0, 1.32, 1.0)), verts=bm_pk.verts)
+    peak = bm_to_object(bm_pk, "Shako_peak", (0, 0.062, bot_z + 0.012))
+    peak.rotation_euler = (math.radians(-18), 0, 0)
+    mat(peak, "shako")
+    finalize_organic(peak, levels=1)
+    parts.append(peak)
+
+    # Brass plate
+    bm_pl = bmesh.new()
+    bmesh.ops.create_cube(bm_pl, size=1.0)
+    bmesh.ops.scale(bm_pl, vec=Vector((0.088, 0.012, 0.078)), verts=bm_pl.verts)
+    plate = bm_to_object(bm_pl, "Shako_plate",
+                         (0, 0.122, bot_z + body_h - 0.032))
+    mat(plate, "brass")
+    finalize_organic(plate, levels=1)
+    parts.append(plate)
+
+    # Plume / tuft
+    bm_t = tapered_cone_mesh(r_base=0.026, r_top=0.016,
+                              height=0.10, segments=12)
+    tuft = bm_to_object(bm_t, "Shako_tuft",
+                        (0, 0.018, bot_z + body_h + 0.05))
+    mat(tuft, "facing")
+    finalize_organic(tuft, levels=1)
+    parts.append(tuft)
+
+    return parts
+
+
+# ===========================================================================
+# MUSKET  (Brown Bess with bayonet)
 # ===========================================================================
 
 def make_musket():
-    parts = []
+    parts    = []
     tilt     = math.radians(9)
-    mx       = -(TORSO_PROFILE[0][1] + 0.075)
-    my       = 0.05
+    mx       = -(TORSO_CROSS[0][1] + 0.075)
+    my       = 0.050
     barrel_z = TORSO_Z + 0.02
 
-    bm = tapered_cone_mesh(r_base=0.016, r_top=0.013, height=1.20, segments=12)
+    bm     = tapered_cone_mesh(r_base=0.016, r_top=0.013,
+                                height=1.20, segments=12)
     barrel = bm_to_object(bm, "Musket_barrel", (mx, my, barrel_z))
     barrel.rotation_euler = (tilt, 0, 0)
     mat(barrel, "steel")
     finalize_organic(barrel, levels=1)
     parts.append(barrel)
 
-    bm = box_mesh(0.038, 0.055, 0.64)
-    stock = bm_to_object(bm, "Musket_stock", (mx, my, barrel_z - 0.55))
+    bm2   = bmesh.new()
+    bmesh.ops.create_cube(bm2, size=1.0)
+    bmesh.ops.scale(bm2, vec=Vector((0.038, 0.055, 0.64)), verts=bm2.verts)
+    stock = bm_to_object(bm2, "Musket_stock", (mx, my, barrel_z - 0.55))
     stock.rotation_euler = (tilt, 0, 0)
     mat(stock, "wood")
     finalize_organic(stock, levels=1)
     parts.append(stock)
 
-    bm = tapered_cone_mesh(r_base=0.006, r_top=0.001, height=0.30, segments=6)
-    bayonet = bm_to_object(bm, "Musket_bayonet", (mx, my, barrel_z + 0.66))
+    bm3     = tapered_cone_mesh(r_base=0.006, r_top=0.001,
+                                 height=0.30, segments=6)
+    bayonet = bm_to_object(bm3, "Musket_bayonet", (mx, my, barrel_z + 0.66))
     bayonet.rotation_euler = (tilt, 0, 0)
     mat(bayonet, "steel")
     finalize_organic(bayonet, levels=1)
@@ -722,7 +726,7 @@ def assemble_soldier():
     parts.extend(make_crossbelts())
     parts.extend(make_musket())
 
-    # Bake any remaining rotations
+    # Bake any pending rotation transforms (musket tilt, peak tilt …)
     bpy.ops.object.select_all(action='DESELECT')
     for o in parts:
         o.select_set(True)
@@ -735,10 +739,9 @@ def assemble_soldier():
     select_only(soldier)
     bpy.ops.object.origin_set(type='ORIGIN_CURSOR')
 
-    n_verts = len(soldier.data.vertices)
-    n_faces = len(soldier.data.polygons)
-    print(f"[BritInf] BP_BritishInfantry — {n_verts} verts, {n_faces} faces "
-          f"(high-detail, subdivided)")
+    nv = len(soldier.data.vertices)
+    nf = len(soldier.data.polygons)
+    print(f"[BritInf] BP_BritishInfantry — {nv} verts, {nf} faces (high-detail)")
     return soldier
 
 
@@ -746,4 +749,4 @@ if __name__ == "__main__":
     assemble_soldier()
     print("Done! File -> Export -> FBX for UE5 import.")
     print("UE5 import: Combine Meshes=True, Scale=1.0, Z Up, -Y Forward.")
-    print("Note: high-detail mesh — decimate / build LODs before mass instancing.")
+    print("Note: high-detail — decimate / build LODs before HISM instancing.")
