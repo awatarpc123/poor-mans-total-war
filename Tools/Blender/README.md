@@ -39,6 +39,19 @@ W UE5 przy imporcie:
 | Krzyżowe pasy | Białe skórzane |
 | Muszkiet Brown Bess + bagnet | Metal + drewno |
 
-### Docelowa liczba polygonów
+### Liczba polygonów
 
-~800–1200 poly — zoptymalizowane pod setki jednostek w UE5 HISM/Mass Entity.
+Skrypt jest obecnie w trybie **high-detail** — używa gęstych siatek + zaaplikowanego
+modyfikatora **Subdivision Surface (poziom 2)** dla organicznych/ubraniowych części
+(obłe, naturalne kształty + Shade Smooth). Polycount NIE jest zoptymalizowany.
+
+Dodatkowe detale w tej wersji:
+- Poły munduru (coat tails) opadające na uda + boczne panele
+- Wyłogi (lapels) z rzędem mosiężnych guzików + stojący kołnierz
+- Mankiety (cuffs) i pagony/naramienniki na barkach
+- Sferyczne stawy (bark, łokieć, biodro, kolano) dla płynnych zgięć po subdiv
+- Głowa z zarysowaną żuchwą/podbródkiem (nie sama sfera)
+- Czako z daszkiem (peak), false-front, plakietą i pomponem
+- Pasy krzyżowe rzutowane na krzywiznę klatki piersiowej (przylegają)
+
+**Przed masowym instancjonowaniem (HISM)** zdecymuj mesh i zbuduj LOD-y.
