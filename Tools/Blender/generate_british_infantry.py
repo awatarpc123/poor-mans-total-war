@@ -665,40 +665,193 @@ def make_shako():
 
 
 # ===========================================================================
-# MUSKET  (Brown Bess with bayonet)
+# MUSKET  (Brown Bess / Pattern 1796-1816 flintlock, with socket bayonet)
 # ===========================================================================
+#
+# Built in a LOCAL frame where the musket axis runs along +Z:
+#   local z = 0.00  -> butt (shoulder end)
+#   local z grows toward the muzzle / bayonet tip
+# The whole weapon is held vertically at the soldier's right side, so the
+# local +Z already maps to world +Z — only a positional offset is applied
+# via `base`. No global rotation needed.
 
 def make_musket():
-    parts    = []
-    tilt     = math.radians(9)
-    mx       = -(TORSO_CROSS[0][1] + 0.075)
-    my       = 0.050
-    barrel_z = TORSO_Z + 0.02
+    parts = []
 
-    bm     = tapered_cone_mesh(r_base=0.016, r_top=0.013,
-                                height=1.20, segments=12)
-    barrel = bm_to_object(bm, "Musket_barrel", (mx, my, barrel_z))
-    barrel.rotation_euler = (tilt, 0, 0)
-    mat(barrel, "steel")
-    finalize_organic(barrel, levels=1)
-    parts.append(barrel)
+    # --- placement of the local frame in world space ---
+    MUSKET_X = -(TORSO_CROSS[0][1] + 0.08)   # right side of the body  (≈ -0.31)
+    MUSKET_Y = 0.06                          # slightly in front of the soldier
+    BUTT_Z   = HIP_Z - 0.10                  # butt sits by the right hand
+    base     = Vector((MUSKET_X, MUSKET_Y, BUTT_Z))
 
-    bm2   = bmesh.new()
-    bmesh.ops.create_cube(bm2, size=1.0)
-    bmesh.ops.scale(bm2, vec=Vector((0.038, 0.055, 0.64)), verts=bm2.verts)
-    stock = bm_to_object(bm2, "Musket_stock", (mx, my, barrel_z - 0.55))
-    stock.rotation_euler = (tilt, 0, 0)
-    mat(stock, "wood")
-    finalize_organic(stock, levels=1)
-    parts.append(stock)
+    def loc(x, y, z):
+        return (base.x + x, base.y + y, base.z + z)
 
-    bm3     = tapered_cone_mesh(r_base=0.006, r_top=0.001,
-                                 height=0.30, segments=6)
-    bayonet = bm_to_object(bm3, "Musket_bayonet", (mx, my, barrel_z + 0.66))
-    bayonet.rotation_euler = (tilt, 0, 0)
-    mat(bayonet, "steel")
-    finalize_organic(bayonet, levels=1)
-    parts.append(bayonet)
+    def add(obj, key):
+        mat(obj, key)
+        finalize_organic(obj, levels=1)
+        parts.append(obj)
+        return obj
+
+    # gentle curvature of the wooden stock along its length (Y centre offset)
+    def stock_y(z):
+        pts = [(0.00, 0.020), (0.24, 0.000), (1.00, -0.010)]
+        if z <= pts[0][0]:  return pts[0][1]
+        if z >= pts[-1][0]: return pts[-1][1]
+        for i in range(len(pts) - 1):
+            z0, v0 = pts[i]
+            z1, v1 = pts[i + 1]
+            if z0 <= z <= z1:
+                t = (z - z0) / (z1 - z0)
+                return v0 + (v1 - v0) * t
+        return pts[-1][1]
+
+    # -----------------------------------------------------------------
+    # STOCK  (one ring_prism_mesh, butt -> fore-end, 10 oval sections)
+    # -----------------------------------------------------------------
+    # (local_z, half_width_x, half_depth_y)
+    stock_sects = [
+        (0.00, 0.060, 0.045),   # butt face
+        (0.08, 0.060, 0.045),   # butt
+        (0.18, 0.040, 0.030),   # toward the wrist
+        (0.24, 0.030, 0.025),   # wrist / grip — narrowest
+        (0.30, 0.038, 0.028),   # behind the lock
+        (0.42, 0.035, 0.026),   # lock area
+        (0.50, 0.030, 0.024),   # start of the fore-end
+        (0.72, 0.026, 0.022),   # fore-end
+        (0.88, 0.024, 0.020),   # fore-end
+        (1.00, 0.022, 0.018),   # fore-end cap
+    ]
+    rings = [ellipse_ring(0.0, stock_y(z), z, rx, ry, n=12)
+             for z, rx, ry in stock_sects]
+    stock = bm_to_object(ring_prism_mesh(rings), "Musket_stock", base)
+    add(stock, "wood")
+
+    # -----------------------------------------------------------------
+    # BARREL  (round, tapering breech -> muzzle, sits above the fore-end)
+    # -----------------------------------------------------------------
+    barrel_breech = 0.30
+    barrel_len    = 1.07
+    barrel_y      = 0.015                       # offset above the stock axis
+    barrel_cz     = barrel_breech + barrel_len / 2
+    muzzle_z      = barrel_breech + barrel_len  # 1.37
+    bm = tapered_cone_mesh(r_base=0.016, r_top=0.013,
+                           height=barrel_len, segments=14)
+    barrel = bm_to_object(bm, "Musket_barrel", loc(0, barrel_y, barrel_cz))
+    add(barrel, "steel")
+
+    # Muzzle cap
+    cap = bm_to_object(sphere_mesh(0.018, u=12, v=8),
+                       "Musket_muzzlecap", loc(0, barrel_y, muzzle_z))
+    add(cap, "steel")
+
+    # -----------------------------------------------------------------
+    # RAMROD  (under the barrel, in the fore-end channel)
+    # -----------------------------------------------------------------
+    bm = tapered_cone_mesh(r_base=0.005, r_top=0.004, height=0.90, segments=8)
+    ramrod = bm_to_object(bm, "Musket_ramrod",
+                          loc(0, barrel_y - 0.008, 0.45 + 0.45))
+    add(ramrod, "steel")
+
+    # -----------------------------------------------------------------
+    # BARREL BANDS  (3 metal rings clasping barrel + fore-end)
+    # -----------------------------------------------------------------
+    for i, bz in enumerate((0.42, 0.62, 0.82)):
+        bm = tapered_cone_mesh(r_base=0.028, r_top=0.028,
+                               height=0.018, segments=16)
+        band = bm_to_object(bm, f"Musket_band{i}", loc(0, barrel_y, bz))
+        add(band, "steel")
+
+    # -----------------------------------------------------------------
+    # FLINTLOCK  (lock plate + cock/hammer + frizzen, right side)
+    # -----------------------------------------------------------------
+    lock_x = -0.045   # right side of the stock
+    # (a) lock plate — flat plate against the stock
+    bm = box_mesh(0.018, 0.10, 0.055)
+    plate = bm_to_object(bm, "Lock_plate", loc(lock_x, 0.020, 0.28))
+    add(plate, "steel")
+
+    # (b) cock / hammer — tumbler base + arm cocked back & up
+    bm = box_mesh(0.015, 0.020, 0.035)
+    tumbler = bm_to_object(bm, "Lock_tumbler", loc(lock_x - 0.006, 0.040, 0.300))
+    add(tumbler, "steel")
+
+    bm = tapered_cone_mesh(r_base=0.008, r_top=0.005, height=0.06, segments=8)
+    cock = bm_to_object(bm, "Lock_cock", loc(lock_x - 0.006, 0.058, 0.330))
+    cock.rotation_euler = (-0.8, 0, 0)          # drawn back, ready to fire
+    add(cock, "steel")
+
+    # (c) frizzen — angled forward, just ahead of the cock
+    bm = box_mesh(0.015, 0.030, 0.042)
+    frizzen = bm_to_object(bm, "Lock_frizzen", loc(lock_x - 0.004, 0.072, 0.352))
+    frizzen.rotation_euler = (math.radians(15), 0, 0)
+    add(frizzen, "steel")
+
+    # -----------------------------------------------------------------
+    # TRIGGER GUARD  (bowed metal tube under the wrist)
+    # -----------------------------------------------------------------
+    guard_rings = []
+    g_steps = 8
+    for s in range(g_steps + 1):
+        t   = s / g_steps
+        gz  = 0.20 + 0.13 * t
+        gy  = 0.030 + 0.030 * math.sin(math.pi * t)   # bows downward/outward
+        gx  = -0.010
+        ring = []
+        for k in range(6):
+            a = 2 * math.pi * k / 6
+            ring.append((gx + 0.004 * math.cos(a),
+                         gy + 0.004 * math.sin(a),
+                         gz))
+        guard_rings.append(ring)
+    guard = bm_to_object(ring_prism_mesh(guard_rings), "Trigger_guard", base)
+    add(guard, "steel")
+
+    # -----------------------------------------------------------------
+    # BUTT PLATE  (metal plate over the shoulder end of the butt)
+    # -----------------------------------------------------------------
+    bm = box_mesh(0.062, 0.008, 0.10)
+    buttplate = bm_to_object(bm, "Butt_plate", loc(0, 0.020 - 0.044, 0.05))
+    add(buttplate, "steel")
+
+    # -----------------------------------------------------------------
+    # SOCKET BAYONET  (socket + offset elbow + triangular blade)
+    # -----------------------------------------------------------------
+    # (a) socket tube clamping over the muzzle
+    bm = tapered_cone_mesh(r_base=0.020, r_top=0.020, height=0.06, segments=12)
+    socket = bm_to_object(bm, "Bayonet_socket",
+                          loc(0, barrel_y, muzzle_z + 0.03))
+    add(socket, "steel")
+
+    # (b) elbow / offset arm carrying the blade to the side of the bore
+    bm = box_mesh(0.015, 0.040, 0.015)
+    elbow = bm_to_object(bm, "Bayonet_elbow",
+                         loc(0, barrel_y + 0.028, muzzle_z + 0.065))
+    add(elbow, "steel")
+
+    # (c) triangular blade, tapering to a point (length ≈ 0.43 m)
+    blade_y0 = barrel_y + 0.030
+    blade_z0 = muzzle_z + 0.07
+    blade_len = 0.43
+    blade_sects = [
+        (0.00, 0.013),
+        (0.06, 0.012),
+        (0.18, 0.009),
+        (0.30, 0.006),
+        (0.40, 0.003),
+        (blade_len, 0.001),
+    ]
+    blade_rings = []
+    for dz, rr in blade_sects:
+        ring = []
+        for k in range(3):                       # 3-sided cross-section
+            a = math.pi / 2 + 2 * math.pi * k / 3
+            ring.append((rr * math.cos(a),
+                         blade_y0 + rr * math.sin(a),
+                         blade_z0 + dz))
+        blade_rings.append(ring)
+    blade = bm_to_object(ring_prism_mesh(blade_rings), "Bayonet_blade", base)
+    add(blade, "steel")
 
     return parts
 
