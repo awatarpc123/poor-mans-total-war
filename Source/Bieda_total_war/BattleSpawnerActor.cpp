@@ -476,7 +476,7 @@ void ABattleSpawnerActor::SpawnAgents()
 }
 
 void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 InRowSize,
-	const FVector& InFrontLineDir)
+	const FVector& InFrontLineDir, bool bInstant)
 {
 	// Ground move cancels any active engagement
 	EngagedTarget = nullptr;
@@ -556,6 +556,10 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 
 	// Build rotation: X = front line direction, Y = depth direction
 	const FQuat FormRot = FRotationMatrix::MakeFromX(FrontLineDir).ToQuat();
+	// Direction soldiers face = perpendicular to the front line (toward the foe).
+	// Used to orient them when teleporting into place during deployment.
+	const FVector FaceDir = FormRot.RotateVector(FVector(0.f, 1.f, 0.f));
+	const FQuat   FaceRot = FRotationMatrix::MakeFromX(FaceDir).ToQuat();
 
 	// ── Assign each LIVING soldier a formation slot (k = packed live index) ───
 	for (int32 k = 0; k < LiveCount; ++k)
@@ -577,6 +581,13 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		FOrderFragment& OF = EM.GetFragmentDataChecked<FOrderFragment>(Entity);
 		OF.TargetPosition  = SlotPos;
 		OF.bHasTarget      = true;
+
+		// Deploy: teleport the soldier straight into his slot (no marching).
+		if (bInstant)
+		{
+			FTransformFragment& TTF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
+			TTF.GetMutableTransform() = FTransform(FaceRot, SlotPos, FVector::OneVector);
+		}
 
 		// Update formation slot info for line infantry movement
 		FAgentVelocityFragment& VF = EM.GetFragmentDataChecked<FAgentVelocityFragment>(Entity);
@@ -619,6 +630,11 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		const FVector FrontLocal(0.f, HalfDepth + 100.f, 0.f);
 		OFF.FormationFrontPos   = NewWorldTarget + FormRot.RotateVector(FrontLocal);
 		OFF.bHasFormationTarget = true;
+		if (bInstant)
+		{
+			FTransformFragment& OTF = EM.GetFragmentDataChecked<FTransformFragment>(OfficerEntity);
+			OTF.GetMutableTransform() = FTransform(FaceRot, OFF.FormationFrontPos, FVector::OneVector);
+		}
 	}
 
 	// ── Update NCO formation positions (file closers behind the line) ─────────
@@ -633,6 +649,11 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 		NCO.FormationPos     = NewWorldTarget + FormRot.RotateVector(RearLocal);
 		NCO.bHasFormationPos = true;
 		NCO.bHasTarget       = false;   // clear stale target on new order
+		if (bInstant)
+		{
+			FTransformFragment& NTF = EM.GetFragmentDataChecked<FTransformFragment>(NCOEntities[n]);
+			NTF.GetMutableTransform() = FTransform(FaceRot, NCO.FormationPos, FVector::OneVector);
+		}
 	}
 
 	// ── Update drummer/fifer positions — BESIDE the officer at the front ──────
@@ -1121,7 +1142,7 @@ int32 ABattleSpawnerActor::GetAliveCount() const
 	return Count;
 }
 
-int32 ABattleSpawnerActor::PurgeDesertersOutside(const FVector& BattlefieldCentre, float Radius)
+int32 ABattleSpawnerActor::PurgeDesertersOutside(const FVector& BattlefieldCentre, float HalfExtent)
 {
 	UWorld* World = GetWorld();
 	if (!World) return 0;
@@ -1130,7 +1151,6 @@ int32 ABattleSpawnerActor::PurgeDesertersOutside(const FVector& BattlefieldCentr
 	if (!Subsystem) return 0;
 
 	FMassEntityManager& EM = Subsystem->GetMutableEntityManager();
-	const float RadiusSq = Radius * Radius;
 	int32 Deserted = 0;
 
 	for (const FMassEntityHandle& Entity : SpawnedEntities)
@@ -1140,8 +1160,10 @@ int32 ABattleSpawnerActor::PurgeDesertersOutside(const FVector& BattlefieldCentr
 		if (SF.State != EAgentState::ROUTING) continue;   // only routers desert
 
 		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
-		const float DistSq = (TF.GetTransform().GetLocation() - BattlefieldCentre).SizeSquared2D();
-		if (DistSq > RadiusSq)
+		const FVector P = TF.GetTransform().GetLocation();
+		// Square map boundary: deserts if past the half-extent on either axis.
+		if (FMath::Abs(P.X - BattlefieldCentre.X) > HalfExtent ||
+			FMath::Abs(P.Y - BattlefieldCentre.Y) > HalfExtent)
 		{
 			// Fled the field — gone for good. Mark DEAD so every system
 			// (counts, visualization, victory check) treats him as removed.

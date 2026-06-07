@@ -55,6 +55,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "1000"))
 	float BattlefieldRadius = 20000.f;
 
+	/** Full map size (cm), square. Default = musket range (5000) * 2 * 10 = 100000.
+	 *  This is ALSO the battlefield boundary: routers who cross it desert. Deploy
+	 *  zones are derived from it (2/3 of the width, 1/5 of the length per side). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "1000"))
+	float MapSize = 100000.f;
+
+	/** World-space deploy zone (Z ignored) for a side. Player's is at the -X edge,
+	 *  enemy's at +X; width = 2/3 of MapSize (along Y), depth = 1/5 (along X). */
+	FBox GetDeployZone(uint8 ForTeamId) const;
+
 	/** Player's team id (everything else is treated as hostile to the player). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field")
 	uint8 PlayerTeamId = 0;
@@ -85,4 +95,8 @@ private:
 	EGamePhase     GamePhase  = EGamePhase::MainMenu;
 
 	void Think();
+
+	/** Draws the map boundary (always, outside the menu) and the two deploy
+	 *  zones (only while deploying). Runs even under the deploy pause. */
+	void DrawFieldBounds() const;
 };

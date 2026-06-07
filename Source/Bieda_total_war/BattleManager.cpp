@@ -2,6 +2,7 @@
 #include "BattleSpawnerActor.h"
 #include "BattleSimControl.h"   // BattleSimPaused()
 #include "EngineUtils.h"
+#include "DrawDebugHelpers.h"
 
 ABattleManager::ABattleManager()
 {
@@ -22,7 +23,10 @@ void ABattleManager::BeginPlay()
 void ABattleManager::StartDeploy()
 {
 	GamePhase = EGamePhase::Deploy;
-	SetBattleSimPaused(false);   // sim runs so units can be positioned; AI off (see Tick)
+	// FULL freeze: units only stand — no marching, no firing, no AI. Placement
+	// during deploy is instant (teleport), issued straight by the camera, so the
+	// sim doesn't need to run.
+	SetBattleSimPaused(true);
 }
 
 void ABattleManager::StartBattle()
@@ -35,6 +39,9 @@ void ABattleManager::StartBattle()
 void ABattleManager::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// Map boundary + deploy zones are drawn even under the deploy pause.
+	DrawFieldBounds();
 
 	// Frozen with the simulation: no AI, no desertion, no victory flips on pause.
 	if (BattleSimPaused()) return;
@@ -69,8 +76,8 @@ void ABattleManager::Think()
 		ABattleSpawnerActor* Sq = *It;
 		if (!Sq) continue;
 
-		// Routers who fled the field desert (removed from the fight).
-		Sq->PurgeDesertersOutside(BattlefieldCentre, BattlefieldRadius);
+		// Routers who fled past the map boundary desert (removed from the fight).
+		Sq->PurgeDesertersOutside(BattlefieldCentre, MapSize * 0.5f);
 
 		const int32 Living = Sq->CountLiving();
 		const bool  bPlayer = (Sq->TeamId == PlayerTeamId);
@@ -124,4 +131,39 @@ void ABattleManager::Think()
 		if (Best)
 			Enemy->IssueEngageOrder(Best);
 	}
+}
+
+FBox ABattleManager::GetDeployZone(uint8 ForTeamId) const
+{
+	const float Half      = MapSize * 0.5f;
+	const float ZoneHalfW = (MapSize * (2.f / 3.f)) * 0.5f;   // along Y (width)
+	const float ZoneDepth =  MapSize * (1.f / 5.f);           // along X (depth)
+	const bool  bPlayer   = (ForTeamId == PlayerTeamId);
+	// Player's zone hugs the -X edge, enemy's the +X edge.
+	const float Cx = bPlayer ? (-Half + ZoneDepth * 0.5f) : (Half - ZoneDepth * 0.5f);
+	const FVector Center = BattlefieldCentre + FVector(Cx, 0.f, 0.f);
+	const FVector Ext(ZoneDepth * 0.5f, ZoneHalfW, 1000.f);
+	return FBox(Center - Ext, Center + Ext);
+}
+
+void ABattleManager::DrawFieldBounds() const
+{
+	UWorld* World = GetWorld();
+	if (!World || GamePhase == EGamePhase::MainMenu) return;
+
+	// Map boundary (square) — also the desertion line.
+	const float Half = MapSize * 0.5f;
+	DrawDebugBox(World, BattlefieldCentre, FVector(Half, Half, 500.f),
+		FQuat::Identity, FColor(200, 200, 80), false, -1.f, 0, 40.f);
+
+	// Deploy zones only while positioning the army.
+	if (GamePhase != EGamePhase::Deploy) return;
+
+	const uint8 EnemyTeam = (PlayerTeamId == 0) ? 1 : 0;
+	const FBox PZ = GetDeployZone(PlayerTeamId);
+	const FBox EZ = GetDeployZone(EnemyTeam);
+	DrawDebugBox(World, PZ.GetCenter(), PZ.GetExtent(), FQuat::Identity,
+		FColor(40, 160, 255), false, -1.f, 0, 60.f);
+	DrawDebugBox(World, EZ.GetCenter(), EZ.GetExtent(), FQuat::Identity,
+		FColor(255, 80, 60), false, -1.f, 0, 60.f);
 }

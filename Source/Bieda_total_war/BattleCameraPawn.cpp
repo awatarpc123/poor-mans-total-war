@@ -9,6 +9,7 @@
 #include "DrawDebugHelpers.h"
 #include "BattleSpawnerActor.h"
 #include "BattleSimControl.h"   // ToggleBattleSimPaused()
+#include "BattleManager.h"      // EGamePhase, deploy zones
 #include "EngineUtils.h"
 
 ABattleCameraPawn::ABattleCameraPawn()
@@ -432,7 +433,22 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 
 			// Front faces AWAY along the drag (negate) so the result matches the
 				// preview: drag left→right → unit looks the way you do (Total War feel).
-				SelectedSpawner->IssueMoveOrder(LineCenter, RowSize, -DragDir);
+				FVector Center = LineCenter;
+				bool bDeploy = false;
+				for (TActorIterator<ABattleManager> It(GetWorld()); It; ++It)
+				{
+					if (It->GetGamePhase() == EGamePhase::Deploy)
+					{
+						bDeploy = true;
+						const FBox Z = It->GetDeployZone(0);
+						Center.X = FMath::Clamp(Center.X, Z.Min.X, Z.Max.X);
+						Center.Y = FMath::Clamp(Center.Y, Z.Min.Y, Z.Max.Y);
+					}
+					break;
+				}
+				// In Deploy: instant placement clamped to the player's zone; otherwise
+				// a normal move order. Front = negated drag (matches the preview).
+				SelectedSpawner->IssueMoveOrder(Center, RowSize, -DragDir, bDeploy);
 		}
 
 		bIsDragging = false;
@@ -472,6 +488,25 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 			600.f, 48, FColor::Cyan, false, 0.5f, 0, 4.f,
 			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
 		return;
+	}
+
+	// ── Deploy: a click on empty ground instantly places the selected unit ──
+	for (TActorIterator<ABattleManager> It(GetWorld()); It; ++It)
+	{
+		if (It->GetGamePhase() == EGamePhase::Deploy)
+		{
+			if (SelectedSpawner)
+			{
+				const FBox Z = It->GetDeployZone(0);
+				FVector C = ClickPos;
+				C.X = FMath::Clamp(C.X, Z.Min.X, Z.Max.X);
+				C.Y = FMath::Clamp(C.Y, Z.Min.Y, Z.Max.Y);
+				SelectedSpawner->IssueMoveOrder(C, SelectedSpawner->GetCurrentRowSize(),
+					FVector::ZeroVector, /*bInstant*/ true);
+			}
+			return;   // a click never engages while deploying
+		}
+		break;
 	}
 
 	// ── Check if click is near an enemy formation → engage ──────────────

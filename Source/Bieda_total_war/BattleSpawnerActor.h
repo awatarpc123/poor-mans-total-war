@@ -201,7 +201,7 @@ public:
 	 * @param InFrontLineDir  Direction of the front line (zero = auto from center→target)
 	 */
 	void IssueMoveOrder(const FVector& NewWorldTarget, int32 InRowSize = -1,
-		const FVector& InFrontLineDir = FVector::ZeroVector);
+		const FVector& InFrontLineDir = FVector::ZeroVector, bool bInstant = false);
 
 	/**
 	 * Engage an enemy squad — auto-approach, stop at fire range, chase if enemy moves.
@@ -239,7 +239,7 @@ public:
 	/** Kill (mark DEAD = remove from the fight) every ROUTING soldier whose 2D
 	 *  distance from BattlefieldCentre exceeds Radius — they've fled the field
 	 *  and desert. Returns how many deserted this call. Used by BattleManager. */
-	int32 PurgeDesertersOutside(const FVector& BattlefieldCentre, float Radius);
+	int32 PurgeDesertersOutside(const FVector& BattlefieldCentre, float HalfExtent);
 
 	/** Currently engaged enemy (nullptr = none). */
 	ABattleSpawnerActor* GetEngagedTarget() const { return EngagedTarget; }
