@@ -14,6 +14,7 @@
 #include "BattleSpawnerActor.h"
 #include "BattleCameraPawn.h"
 #include "BattleManager.h"
+#include "BattleSimControl.h"
 #include "GameFramework/PlayerController.h"
 
 /**
@@ -242,6 +243,27 @@ public:
 					.Text_Lambda([this]() -> FText { return FText::FromString(GetOutcomeText()); })
 				]
 			]
+
+			// ══ Layer 3: pause / time-scale indicator (top-center) ══════════
+			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.f, 12.f, 0.f, 0.f)
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f))
+				.Padding(FMargin(16.f, 5.f))
+				.Visibility_Lambda([this]() {
+					return GetTimeStatusText().IsEmpty() ? EVisibility::Collapsed
+					                                     : EVisibility::HitTestInvisible;
+				})
+				[
+					SNew(STextBlock)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+					.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+						return BattleSimPaused() ? FSlateColor(FLinearColor(1.f, 0.85f, 0.2f))
+						                         : FSlateColor(FLinearColor(0.6f, 0.85f, 1.f));
+					})
+					.Text_Lambda([this]() -> FText { return FText::FromString(GetTimeStatusText()); })
+				]
+			]
 		];
 	}
 
@@ -334,6 +356,16 @@ private:
 		ABattleSpawnerActor* S = GetSelectedSpawner();
 		if (!S) return 0.f;
 		return FMath::Clamp(S->GetAverageMorale() / 100.f, 0.f, 1.f);
+	}
+
+	// ── Pause / time-scale indicator text (empty = normal speed → hide) ────
+	FString GetTimeStatusText() const
+	{
+		if (BattleSimPaused()) return TEXT("PAUZA");
+		const float TS = BattleSimTimeScale();
+		if (!FMath::IsNearlyEqual(TS, 1.f))
+			return FString::Printf(TEXT("x%g"), TS);   // x0.25 / x0.5 / x2 / x4
+		return FString();
 	}
 
 	// ── Button helper ────────────────────────────────────────────────────
