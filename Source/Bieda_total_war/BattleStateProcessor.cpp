@@ -178,7 +178,15 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				MF.Morale = FMath::Min(100.f, MF.Morale + 5.f * DT);
 				if (MF.Morale > 50.f)
 				{
-					SF.State     = EAgentState::HOLDING;
+					// Rallied. If he fled far from his formation slot, march BACK to
+					// re-form (Total War: routers regroup) by re-entering ADVANCING —
+					// MovementProcessor walks him to TargetPosition and ADVANCING→
+					// HOLDING (above) stops him on arrival. If he's already near his
+					// slot, just hold.
+					const FVector Pos = Transforms[i].GetTransform().GetLocation();
+					const bool bFarFromSlot = OF.bHasTarget &&
+						(OF.TargetPosition - Pos).SizeSquared() > FMath::Square(150.f);
+					SF.State      = bFarFromSlot ? EAgentState::ADVANCING : EAgentState::HOLDING;
 					SF.StateTimer = 0.f;
 				}
 				break;
