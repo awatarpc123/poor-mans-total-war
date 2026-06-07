@@ -12,8 +12,24 @@ ABattleManager::ABattleManager()
 void ABattleManager::BeginPlay()
 {
 	Super::BeginPlay();
+	// Game opens on the main menu: freeze the simulation behind the overlay.
+	GamePhase = EGamePhase::MainMenu;
+	SetBattleSimPaused(true);
 	// First think slightly delayed so all spawners have finished BeginPlay/spawn.
 	ThinkTimer = 0.5f;
+}
+
+void ABattleManager::StartDeploy()
+{
+	GamePhase = EGamePhase::Deploy;
+	SetBattleSimPaused(false);   // sim runs so units can be positioned; AI off (see Tick)
+}
+
+void ABattleManager::StartBattle()
+{
+	GamePhase = EGamePhase::Battle;
+	SetBattleSimPaused(false);
+	ThinkTimer = 0.1f;           // start thinking (AI/victory) almost immediately
 }
 
 void ABattleManager::Tick(float DeltaSeconds)
@@ -22,6 +38,10 @@ void ABattleManager::Tick(float DeltaSeconds)
 
 	// Frozen with the simulation: no AI, no desertion, no victory flips on pause.
 	if (BattleSimPaused()) return;
+
+	// AI, desertion and victory checks run only once the battle has started —
+	// not in the main menu or while the player is still deploying.
+	if (GamePhase != EGamePhase::Battle) return;
 
 	// Once decided, stop thinking — the battle is over.
 	if (Outcome != EBattleOutcome::Ongoing) return;

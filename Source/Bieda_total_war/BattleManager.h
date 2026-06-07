@@ -15,6 +15,14 @@ enum class EBattleOutcome : uint8
 	Draw          // both sides wiped (mutual annihilation)
 };
 
+UENUM()
+enum class EGamePhase : uint8
+{
+	MainMenu,   // start screen — simulation frozen behind the menu overlay
+	Deploy,     // arrange your units; sim runs but enemy AI is still OFF
+	Battle      // full battle: enemy AI + victory checks active
+};
+
 /**
  * The battle "brain": one coordinator actor (spawned by the GameMode) that, on
  * a slow tick (~2s), drives the parts of the game loop that need a global view:
@@ -58,12 +66,23 @@ public:
 	/** Current outcome — Ongoing until one side is wiped. Read by the HUD. */
 	EBattleOutcome GetOutcome() const { return Outcome; }
 
+	/** Current game phase (menu / deploy / battle). Read by the HUD. */
+	EGamePhase GetGamePhase() const { return GamePhase; }
+
+	/** Main-menu "GRAJ" → enter deployment: sim resumes so you can position
+	 *  your units, but enemy AI and victory checks stay off. */
+	void StartDeploy();
+
+	/** Deployment "ROZPOCZNIJ BITWĘ" → begin the battle proper (AI on). */
+	void StartBattle();
+
 protected:
 	virtual void BeginPlay() override;
 
 private:
 	float          ThinkTimer = 0.f;
 	EBattleOutcome Outcome    = EBattleOutcome::Ongoing;
+	EGamePhase     GamePhase  = EGamePhase::MainMenu;
 
 	void Think();
 };

@@ -15,6 +15,7 @@
 #include "BattleCameraPawn.h"
 #include "BattleManager.h"
 #include "BattleSimControl.h"
+#include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 
 /**
@@ -46,10 +47,14 @@ public:
 		[
 			SNew(SOverlay)
 
-			// ══ Layer 1: normal HUD (unit panel + cards) ════════════════════
+			// ══ Layer 1: normal HUD (unit panel + cards) — hidden in MainMenu ═
 			+ SOverlay::Slot()
 			[
 			SNew(SVerticalBox)
+			.Visibility_Lambda([this]() {
+				return GetGamePhase() == EGamePhase::MainMenu
+					? EVisibility::Collapsed : EVisibility::Visible;
+			})
 
 			// Spacer pushes everything to bottom
 			+ SVerticalBox::Slot().FillHeight(1.f)
@@ -233,14 +238,26 @@ public:
 				.Padding(FMargin(60.f, 30.f))
 				.Visibility_Lambda([this]() {
 					return GetOutcomeText().IsEmpty() ? EVisibility::Collapsed
-					                                  : EVisibility::HitTestInvisible;
+					                                  : EVisibility::Visible;
 				})
 				[
-					SNew(STextBlock)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 48))
-					.Justification(ETextJustify::Center)
-					.ColorAndOpacity_Lambda([this]() -> FSlateColor { return GetOutcomeColor(); })
-					.Text_Lambda([this]() -> FText { return FText::FromString(GetOutcomeText()); })
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 48))
+						.Justification(ETextJustify::Center)
+						.ColorAndOpacity_Lambda([this]() -> FSlateColor { return GetOutcomeColor(); })
+						.Text_Lambda([this]() -> FText { return FText::FromString(GetOutcomeText()); })
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 24.f, 0.f, 0.f)
+					[
+						SNew(SHorizontalBox)
+						+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)
+						[ MakeMenuButton(TEXT("JESZCZE RAZ"), [this]() { DoRestart(); }) ]
+						+ SHorizontalBox::Slot().AutoWidth()
+						[ MakeMenuButton(TEXT("WYJŚCIE"), [this]() { DoQuit(); }) ]
+					]
 				]
 			]
 
@@ -262,6 +279,58 @@ public:
 						                         : FSlateColor(FLinearColor(0.6f, 0.85f, 1.f));
 					})
 					.Text_Lambda([this]() -> FText { return FText::FromString(GetTimeStatusText()); })
+				]
+			]
+
+			// ══ Layer 4: main menu (full-screen, only in MainMenu) ══════════
+			+ SOverlay::Slot()
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.02f, 0.03f, 0.06f, 0.98f))
+				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
+				.Visibility_Lambda([this]() {
+					return GetGamePhase() == EGamePhase::MainMenu
+						? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().FillHeight(1.f)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 50.f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("BIEDA TOTAL WAR")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 56))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.78f, 0.5f)))
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 14.f)
+					[ MakeMenuButton(TEXT("GRAJ"), [this]() { DoStartDeploy(); }) ]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					[ MakeMenuButton(TEXT("WYJŚCIE"), [this]() { DoQuit(); }) ]
+					+ SVerticalBox::Slot().FillHeight(1.f)
+				]
+			]
+
+			// ══ Layer 5: deployment bar (only in Deploy) ════════════════════
+			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.f, 52.f, 0.f, 0.f)
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(PanelBG)
+				.Padding(FMargin(20.f, 10.f))
+				.Visibility_Lambda([this]() {
+					return GetGamePhase() == EGamePhase::Deploy
+						? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 20.f, 0.f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("Rozstaw oddziały (przeciągnij), potem rozpocznij bitwę")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 14))
+						.ColorAndOpacity(FSlateColor(FLinearColor::White))
+					]
+					+ SHorizontalBox::Slot().AutoWidth()
+					[ MakeMenuButton(TEXT("ROZPOCZNIJ BITWĘ"), [this]() { DoStartBattle(); }) ]
 				]
 			]
 		];
@@ -366,6 +435,58 @@ private:
 		if (!FMath::IsNearlyEqual(TS, 1.f))
 			return FString::Printf(TEXT("x%g"), TS);   // x0.25 / x0.5 / x2 / x4
 		return FString();
+	}
+
+	// ── Game phase (menu / deploy / battle) ───────────────────────────────
+	ABattleManager* GetManager() const
+	{
+		if (!World) return nullptr;
+		for (TActorIterator<ABattleManager> It(World); It; ++It) return *It;
+		return nullptr;
+	}
+
+	EGamePhase GetGamePhase() const
+	{
+		ABattleManager* M = GetManager();
+		return M ? M->GetGamePhase() : EGamePhase::Battle;   // no manager → behave as battle
+	}
+
+	// ── Menu / phase actions ──────────────────────────────────────────────
+	void DoStartDeploy() { if (ABattleManager* M = GetManager()) M->StartDeploy(); }
+	void DoStartBattle() { if (ABattleManager* M = GetManager()) M->StartBattle(); }
+
+	void DoRestart()
+	{
+		if (World)
+			UGameplayStatics::OpenLevel(World, FName(*UGameplayStatics::GetCurrentLevelName(World)));
+	}
+
+	void DoQuit()
+	{
+		if (World)
+			if (APlayerController* PC = World->GetFirstPlayerController())
+				PC->ConsoleCommand(TEXT("quit"));
+	}
+
+	// ── Big menu button (Graj / Wyjście / Restart) ────────────────────────
+	TSharedRef<SWidget> MakeMenuButton(const FString& Label, TFunction<void()> OnClick)
+	{
+		return SNew(SButton)
+			.ContentPadding(0.f)
+			.ButtonColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.f))
+			.OnClicked_Lambda([OnClick]() -> FReply { if (OnClick) OnClick(); return FReply::Handled(); })
+			[
+				SNew(SBorder)
+				.Padding(FMargin(40.f, 14.f))
+				.HAlign(HAlign_Center)
+				.BorderBackgroundColor(ActiveBtn)
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Label))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 20))
+					.ColorAndOpacity(FSlateColor(FLinearColor::White))
+				]
+			];
 	}
 
 	// ── Button helper ────────────────────────────────────────────────────
