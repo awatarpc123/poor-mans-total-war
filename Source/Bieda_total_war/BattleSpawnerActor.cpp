@@ -1531,6 +1531,18 @@ void ABattleSpawnerActor::UpdateEngagement()
 			NCO.FormationPos     = EngagePos + FormRot.RotateVector(RearLocal);
 			NCO.bHasFormationPos = true;
 		}
+
+		// Musicians: beside the officer at the front, follow him (was a gap —
+		// engagement repositioned officer+NCO but left drummers behind).
+		for (int32 d = 0; d < DrummerEntities.Num(); ++d)
+		{
+			if (!EM.IsEntityValid(DrummerEntities[d])) continue;
+			FDrummerFragment& DR = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerEntities[d]);
+			const float SideStep = 150.f;
+			const FVector MusLocal((d + 1) * SideStep, HalfDepth + 100.f, 0.f);
+			DR.FormationPos     = EngagePos + FormRot.RotateVector(MusLocal);
+			DR.bHasFormationPos = true;
+		}
 	}
 
 	// ── Debug: red line from our center to enemy center ───────────────────
