@@ -73,6 +73,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "0.25"))
 	float ThinkInterval = 2.0f;
 
+	/** Who attacks: true = the AI side advances on the player (player defends);
+	 *  false = AI holds position and only fires when the player closes in.
+	 *  Will be set by the army-setup screen later. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI")
+	bool bEnemyIsAggressor = true;
+
+	/** AI sprints toward a target farther than this (cm), then drops to a march
+	 *  to close and fire in order. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "0"))
+	float AIRunDistance = 8000.f;
+
 	/** Current outcome — Ongoing until one side is wiped. Read by the HUD. */
 	EBattleOutcome GetOutcome() const { return Outcome; }
 

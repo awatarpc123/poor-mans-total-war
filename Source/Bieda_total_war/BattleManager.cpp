@@ -106,30 +106,47 @@ void ABattleManager::Think()
 		return;
 	}
 
-	// ── Enemy AI: idle enemy squads attack the nearest living player squad ──
+	// ── Enemy AI ────────────────────────────────────────────────────────────
+	// Defender: hold position; the combat system fires on its own when the player
+	// closes in. No advancing.
+	if (!bEnemyIsAggressor) return;
+
+	// Aggressor: each idle squad picks a target, spreading attacks across the
+	// player's squads (fewest attackers first, then nearest) instead of all
+	// piling onto one. Sprint when far, march when close enough to fire in order.
+	TMap<ABattleSpawnerActor*, int32> Attackers;
+	for (ABattleSpawnerActor* T : PlayerSquads) Attackers.Add(T, 0);
+
 	for (ABattleSpawnerActor* Enemy : EnemySquads)
 	{
-		// Already fighting a still-living target? Leave it be.
-		if (const ABattleSpawnerActor* Cur = Enemy->GetEngagedTarget())
+		// Already fighting a living target? keep it, but count the assignment.
+		if (ABattleSpawnerActor* Cur = Enemy->GetEngagedTarget())
 		{
-			if (Cur->HasAliveSoldiers()) continue;
+			if (Cur->HasAliveSoldiers())
+			{
+				if (int32* C = Attackers.Find(Cur)) ++(*C);
+				continue;
+			}
 		}
 
 		const FVector EnemyCentre = Enemy->GetFormationCenter();
 		ABattleSpawnerActor* Best = nullptr;
-		float BestDistSq = FLT_MAX;
+		float BestScore = FLT_MAX;
 		for (ABattleSpawnerActor* Target : PlayerSquads)
 		{
-			const float DistSq = (Target->GetFormationCenter() - EnemyCentre).SizeSquared2D();
-			if (DistSq < BestDistSq)
-			{
-				BestDistSq = DistSq;
-				Best       = Target;
-			}
+			const float Dist = FMath::Sqrt((Target->GetFormationCenter() - EnemyCentre).SizeSquared2D());
+			// Spread out first (each existing attacker is a heavy penalty), then nearest.
+			const float Score = Attackers[Target] * 1.0e6f + Dist;
+			if (Score < BestScore) { BestScore = Score; Best = Target; }
 		}
 
 		if (Best)
+		{
+			const float Dist = FMath::Sqrt((Best->GetFormationCenter() - EnemyCentre).SizeSquared2D());
+			Enemy->SetForceRun(Dist > AIRunDistance);   // sprint when far, march when close
 			Enemy->IssueEngageOrder(Best);
+			++Attackers[Best];
+		}
 	}
 }
 
