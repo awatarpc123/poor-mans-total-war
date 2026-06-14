@@ -258,8 +258,10 @@ void ABattleCameraPawn::DrawFormationPreview(const FVector& Center, int32 RowSiz
 	{
 		const int32 Col = i % RowSize;
 		const int32 Row = i / RowSize;
+		const int32 InRow = FMath::Min(RowSize, NumAgents - Row * RowSize);
+		const float CenterShift = (RowSize - InRow) * Spacing * 0.5f;  // centre partial last row
 		const FVector LocalOffset(
-			Col * Spacing - HalfFront,
+			Col * Spacing - HalfFront + CenterShift,
 			HalfDepth - Row * Spacing,
 			0.f
 		);

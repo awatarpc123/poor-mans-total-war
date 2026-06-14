@@ -236,7 +236,9 @@ void ABattleSpawnerActor::SpawnAgents()
 		const int32 Col = i % EffectiveRowSize;
 		// Lateral spreads along the front line; forward places row 0 at the FRONT
 		// (toward Fwd) with later ranks stepping back — same as the dressed move.
-		const float LatOff = Col * ColSpacing() - HalfFront;
+		const int32 InRow = FMath::Min(EffectiveRowSize, NumAgents - Row * EffectiveRowSize);
+		const float CenterShift = (EffectiveRowSize - InRow) * ColSpacing() * 0.5f;  // centre a partial last row
+		const float LatOff = Col * ColSpacing() - HalfFront + CenterShift;
 		const float FwdOff = HalfDepth - Row * SpawnSpacing;
 		const FVector SpawnPos = Base + Lat * LatOff + Fwd * FwdOff;
 
@@ -571,8 +573,10 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 
 		// Col = position along front line (X of rotation)
 		// Row = depth, front row (Row=0) at +Y, back rows toward -Y
+		const int32 InRow = FMath::Min(LocalRowSize, LiveCount - Row * LocalRowSize);
+		const float CenterShift = (LocalRowSize - InRow) * ColSpacing() * 0.5f;  // centre partial last row
 		const FVector LocalOffset(
-			Col * ColSpacing() - HalfFront,
+			Col * ColSpacing() - HalfFront + CenterShift,
 			HalfDepth - Row * SpawnSpacing,
 			0.f
 		);
@@ -837,7 +841,8 @@ void ABattleSpawnerActor::IssueHaltOrder()
 		const FMassEntityHandle E = Living[Slot[k]];
 
 		const float SlotF = FrontF - Row * SpawnSpacing;
-		const float SlotL = LatCenter + (Col - (Cols - 1) * 0.5f) * ColSpacing();
+		const int32 InRow = FMath::Min(Cols, N - Row * Cols);
+		const float SlotL = LatCenter + (Col - (InRow - 1) * 0.5f) * ColSpacing();  // centre partial last row
 		const FVector SlotPos = Fwd * SlotF + LatDir * SlotL + FVector(0.f, 0.f, BaseZ);
 
 		FOrderFragment& OF = EM.GetFragmentDataChecked<FOrderFragment>(E);
@@ -1374,8 +1379,10 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 
 		const int32 Col = k % LocalRowSize;
 		const int32 Row = k / LocalRowSize;
+		const int32 InRow = FMath::Min(LocalRowSize, LiveCount - Row * LocalRowSize);
+		const float CenterShift = (LocalRowSize - InRow) * ColSpacing() * 0.5f;  // centre partial last row
 		const FVector LocalOffset(
-			Col * ColSpacing() - HalfFront,
+			Col * ColSpacing() - HalfFront + CenterShift,
 			HalfDepth - Row * SpawnSpacing,
 			0.f
 		);
@@ -1501,8 +1508,10 @@ void ABattleSpawnerActor::UpdateEngagement()
 
 			const int32 Col = i % LocalRowSize;
 			const int32 Row = i / LocalRowSize;
+			const int32 InRow = FMath::Min(LocalRowSize, SoldierCount - Row * LocalRowSize);
+			const float CenterShift = (LocalRowSize - InRow) * ColSpacing() * 0.5f;  // centre partial last row
 			const FVector LocalOffset(
-				Col * ColSpacing() - HalfFront,
+				Col * ColSpacing() - HalfFront + CenterShift,
 				HalfDepth - Row * SpawnSpacing,
 				0.f
 			);
