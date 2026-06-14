@@ -3,6 +3,8 @@
 #include "BattleSimControl.h"   // BattleSimPaused()
 #include "EngineUtils.h"
 #include "DrawDebugHelpers.h"
+#include "Kismet/GameplayStatics.h"   // FinishSpawningActor
+#include "BattleTypes.h"              // EUnitType
 
 ABattleManager::ABattleManager()
 {
@@ -34,6 +36,86 @@ void ABattleManager::StartBattle()
 	GamePhase = EGamePhase::Battle;
 	SetBattleSimPaused(false);
 	ThinkTimer = 0.1f;           // start thinking (AI/victory) almost immediately
+}
+
+// ── Army setup ──────────────────────────────────────────────────────────────
+
+void ABattleManager::StartArmySetup()
+{
+	GamePhase = EGamePhase::ArmySetup;
+	SetBattleSimPaused(true);    // pick armies with the sim frozen
+}
+
+void ABattleManager::AddSquad(bool bPlayer, EUnitType Type)
+{
+	int32& Slot = bPlayer
+		? (Type == EUnitType::LineInfantry ? PlayerLineSquads : PlayerMilitiaSquads)
+		: (Type == EUnitType::LineInfantry ? EnemyLineSquads  : EnemyMilitiaSquads);
+	Slot = FMath::Min(Slot + 1, 20);
+}
+
+void ABattleManager::RemoveSquad(bool bPlayer, EUnitType Type)
+{
+	int32& Slot = bPlayer
+		? (Type == EUnitType::LineInfantry ? PlayerLineSquads : PlayerMilitiaSquads)
+		: (Type == EUnitType::LineInfantry ? EnemyLineSquads  : EnemyMilitiaSquads);
+	Slot = FMath::Max(Slot - 1, 0);
+}
+
+int32 ABattleManager::GetSquadCount(bool bPlayer, EUnitType Type) const
+{
+	if (bPlayer) return (Type == EUnitType::LineInfantry) ? PlayerLineSquads : PlayerMilitiaSquads;
+	return (Type == EUnitType::LineInfantry) ? EnemyLineSquads : EnemyMilitiaSquads;
+}
+
+void ABattleManager::ConfirmArmiesAndDeploy()
+{
+	SpawnArmies();
+	GamePhase = EGamePhase::Deploy;
+	SetBattleSimPaused(true);    // deploy = frozen; placement is instant (teleport)
+}
+
+void ABattleManager::SpawnArmies()
+{
+	const uint8 EnemyTeam = (PlayerTeamId == 0) ? 1 : 0;
+	SpawnSideArmy(PlayerTeamId, 0.f,   PlayerMilitiaSquads, PlayerLineSquads);
+	SpawnSideArmy(EnemyTeam,    180.f, EnemyMilitiaSquads,  EnemyLineSquads);
+}
+
+void ABattleManager::SpawnSideArmy(uint8 ForTeamId, float YawDeg, int32 NumMilitia, int32 NumLine)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	const int32 Total = NumMilitia + NumLine;
+	if (Total <= 0) return;
+
+	// Spread the squads across their deploy zone's width (Y), centred on the
+	// zone's X. Margin keeps them off the very edge.
+	const FBox  Zone   = GetDeployZone(ForTeamId);
+	const float Margin = 2500.f;
+	const float MinY   = Zone.Min.Y + Margin;
+	const float MaxY   = Zone.Max.Y - Margin;
+	const float Cx     = Zone.GetCenter().X;
+	const float Cz     = Zone.GetCenter().Z;
+	const FRotator Facing(0.f, YawDeg, 0.f);
+
+	for (int32 i = 0; i < Total; ++i)
+	{
+		const EUnitType Type = (i < NumMilitia) ? EUnitType::Militia : EUnitType::LineInfantry;
+		const float T   = (Total > 1) ? (float)i / (float)(Total - 1) : 0.5f;
+		const FVector Pos(Cx, FMath::Lerp(MinY, MaxY, T), Cz);
+		const FTransform Xf(Facing, Pos);
+
+		ABattleSpawnerActor* S = World->SpawnActorDeferred<ABattleSpawnerActor>(
+			ABattleSpawnerActor::StaticClass(), Xf);
+		if (!S) continue;
+		S->UnitType    = Type;
+		S->NumAgents   = SoldiersPerSquad;
+		S->TeamId      = ForTeamId;
+		S->SpawnFacing = Facing;
+		UGameplayStatics::FinishSpawningActor(S, Xf);
+	}
 }
 
 void ABattleManager::Tick(float DeltaSeconds)

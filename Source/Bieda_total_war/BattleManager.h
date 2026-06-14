@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "BattleTypes.h"          // EUnitType
 #include "BattleManager.generated.h"
 
 class ABattleSpawnerActor;
@@ -19,7 +20,8 @@ UENUM()
 enum class EGamePhase : uint8
 {
 	MainMenu,   // start screen — simulation frozen behind the menu overlay
-	Deploy,     // arrange your units; sim runs but enemy AI is still OFF
+	ArmySetup,  // pick army composition (player + enemy) before deploying
+	Deploy,     // arrange your units; sim frozen, placement is instant
 	Battle      // full battle: enemy AI + victory checks active
 };
 
@@ -84,6 +86,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "0"))
 	float AIRunDistance = 8000.f;
 
+	/** Soldiers in each squad spawned from the army-setup screen. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "1"))
+	int32 SoldiersPerSquad = 50;
+
 	/** Current outcome — Ongoing until one side is wiped. Read by the HUD. */
 	EBattleOutcome GetOutcome() const { return Outcome; }
 
@@ -97,6 +103,20 @@ public:
 	/** Deployment "ROZPOCZNIJ BITWĘ" → begin the battle proper (AI on). */
 	void StartBattle();
 
+	// ── Army setup (custom battle) ──────────────────────────────────────────
+	/** Main-menu "GRAJ" → army selection screen (sim stays frozen). */
+	void StartArmySetup();
+
+	/** Add / remove one squad of a type to a side (player or enemy). */
+	void AddSquad(bool bPlayer, EUnitType Type);
+	void RemoveSquad(bool bPlayer, EUnitType Type);
+
+	/** Squad count of a type on a side — read by the setup UI. */
+	int32 GetSquadCount(bool bPlayer, EUnitType Type) const;
+
+	/** Confirm composition → spawn both armies in their zones → enter Deploy. */
+	void ConfirmArmiesAndDeploy();
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -105,7 +125,15 @@ private:
 	EBattleOutcome Outcome    = EBattleOutcome::Ongoing;
 	EGamePhase     GamePhase  = EGamePhase::MainMenu;
 
+	// Army composition chosen on the setup screen (squad counts per side/type).
+	int32 PlayerMilitiaSquads = 0;
+	int32 PlayerLineSquads    = 0;
+	int32 EnemyMilitiaSquads  = 0;
+	int32 EnemyLineSquads     = 0;
+
 	void Think();
+	void SpawnArmies();
+	void SpawnSideArmy(uint8 ForTeamId, float YawDeg, int32 NumMilitia, int32 NumLine);
 
 	/** Draws the map boundary (always, outside the menu) and the two deploy
 	 *  zones (only while deploying). Runs even under the deploy pause. */

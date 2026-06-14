@@ -52,7 +52,8 @@ public:
 			[
 			SNew(SVerticalBox)
 			.Visibility_Lambda([this]() {
-				return GetGamePhase() == EGamePhase::MainMenu
+				const EGamePhase P = GetGamePhase();
+				return (P == EGamePhase::MainMenu || P == EGamePhase::ArmySetup)
 					? EVisibility::Collapsed : EVisibility::Visible;
 			})
 
@@ -261,24 +262,61 @@ public:
 				]
 			]
 
-			// ══ Layer 3: pause / time-scale indicator (top-center) ══════════
+			// ══ Layer 3: time-control bar (top-center, during battle) ═══════
 			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Top).Padding(0.f, 12.f, 0.f, 0.f)
 			[
 				SNew(SBorder)
 				.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.6f))
-				.Padding(FMargin(16.f, 5.f))
+				.Padding(FMargin(8.f, 4.f))
 				.Visibility_Lambda([this]() {
-					return GetTimeStatusText().IsEmpty() ? EVisibility::Collapsed
-					                                     : EVisibility::HitTestInvisible;
+					return GetGamePhase() == EGamePhase::Battle
+						? EVisibility::Visible : EVisibility::Collapsed;
 				})
 				[
-					SNew(STextBlock)
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
-					.ColorAndOpacity_Lambda([this]() -> FSlateColor {
-						return BattleSimPaused() ? FSlateColor(FLinearColor(1.f, 0.85f, 0.2f))
-						                         : FSlateColor(FLinearColor(0.6f, 0.85f, 1.f));
-					})
-					.Text_Lambda([this]() -> FText { return FText::FromString(GetTimeStatusText()); })
+					SNew(SHorizontalBox)
+					// slow down
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+					[ MakeTimeButton(TEXT("<<"), [this]() { DoSlower(); }) ]
+					// pause / resume (icon flips, highlights when paused)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 4.f, 0.f)
+					[
+						SNew(SButton)
+						.ContentPadding(0.f)
+						.ButtonColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.f))
+						.OnClicked_Lambda([this]() -> FReply { DoTogglePause(); return FReply::Handled(); })
+						[
+							SNew(SBorder).Padding(FMargin(14.f, 5.f)).HAlign(HAlign_Center)
+							.BorderBackgroundColor_Lambda([this]() -> FSlateColor {
+								return BattleSimPaused() ? FSlateColor(FLinearColor(0.7f, 0.55f, 0.1f))
+								                         : FSlateColor(InactiveBtn);
+							})
+							[
+								SNew(STextBlock)
+								.Text_Lambda([this]() -> FText {
+									return FText::FromString(BattleSimPaused() ? TEXT(">") : TEXT("II"));
+								})
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+								.ColorAndOpacity(FSlateColor(FLinearColor::White))
+							]
+						]
+					]
+					// speed up
+					+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 10.f, 0.f)
+					[ MakeTimeButton(TEXT(">>"), [this]() { DoFaster(); }) ]
+					// status (x1 / x2 / PAUZA)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(STextBlock)
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+						.ColorAndOpacity_Lambda([this]() -> FSlateColor {
+							return BattleSimPaused() ? FSlateColor(FLinearColor(1.f, 0.85f, 0.2f))
+							                         : FSlateColor(FLinearColor(0.6f, 0.85f, 1.f));
+						})
+						.Text_Lambda([this]() -> FText {
+							const FString S = GetTimeStatusText();
+							return FText::FromString(S.IsEmpty() ? TEXT("x1") : S);
+						})
+					]
 				]
 			]
 
@@ -303,7 +341,7 @@ public:
 						.ColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.78f, 0.5f)))
 					]
 					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 14.f)
-					[ MakeMenuButton(TEXT("GRAJ"), [this]() { DoStartDeploy(); }) ]
+					[ MakeMenuButton(TEXT("GRAJ"), [this]() { DoStartArmySetup(); }) ]
 					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
 					[ MakeMenuButton(TEXT("WYJŚCIE"), [this]() { DoQuit(); }) ]
 					+ SVerticalBox::Slot().FillHeight(1.f)
@@ -331,6 +369,78 @@ public:
 					]
 					+ SHorizontalBox::Slot().AutoWidth()
 					[ MakeMenuButton(TEXT("ROZPOCZNIJ BITWĘ"), [this]() { DoStartBattle(); }) ]
+				]
+			]
+
+			// ══ Layer 6: army setup (full-screen, only in ArmySetup) ════════
+			+ SOverlay::Slot()
+			[
+				SNew(SBorder)
+				.BorderBackgroundColor(FLinearColor(0.02f, 0.03f, 0.06f, 0.98f))
+				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
+				.Visibility_Lambda([this]() {
+					return GetGamePhase() == EGamePhase::ArmySetup
+						? EVisibility::Visible : EVisibility::Collapsed;
+				})
+				[
+					SNew(SVerticalBox)
+					+ SVerticalBox::Slot().FillHeight(1.f)
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 26.f)
+					[
+						SNew(STextBlock).Text(FText::FromString(TEXT("WYBÓR ARMII")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 40))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.85f, 0.78f, 0.5f)))
+					]
+
+					// ── Twoja armia ──
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 0.f, 0.f, 6.f)
+					[
+						SNew(STextBlock).Text(FText::FromString(TEXT("TWOJA ARMIA")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.8f, 1.f)))
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 3.f)
+					[ MakeSquadRow(TEXT("Milicja"), true, EUnitType::Militia) ]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 3.f)
+					[ MakeSquadRow(TEXT("Piechota liniowa"), true, EUnitType::LineInfantry) ]
+
+					// ── Armia wroga ──
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 16.f, 0.f, 6.f)
+					[
+						SNew(STextBlock).Text(FText::FromString(TEXT("ARMIA WROGA")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+						.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 0.5f, 0.45f)))
+					]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 3.f)
+					[ MakeSquadRow(TEXT("Milicja"), false, EUnitType::Militia) ]
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 3.f)
+					[ MakeSquadRow(TEXT("Piechota liniowa"), false, EUnitType::LineInfantry) ]
+
+					// ── Agresor ──
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0.f, 16.f, 0.f, 16.f)
+					[
+						SNew(SButton)
+						.ContentPadding(0.f)
+						.ButtonColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.f))
+						.OnClicked_Lambda([this]() -> FReply { ToggleAggressor(); return FReply::Handled(); })
+						[
+							SNew(SBorder).Padding(FMargin(26.f, 8.f)).HAlign(HAlign_Center)
+							.BorderBackgroundColor(InactiveBtn)
+							[
+								SNew(STextBlock)
+								.Text_Lambda([this]() -> FText {
+									return FText::FromString(EnemyAggressor()
+										? TEXT("Agresor: WRÓG") : TEXT("Agresor: GRACZ"));
+								})
+								.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+								.ColorAndOpacity(FSlateColor(FLinearColor::White))
+							]
+						]
+					]
+
+					+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center)
+					[ MakeMenuButton(TEXT("ROZSTAW"), [this]() { DoConfirmArmies(); }) ]
+					+ SVerticalBox::Slot().FillHeight(1.f)
 				]
 			]
 		];
@@ -455,6 +565,19 @@ private:
 	void DoStartDeploy() { if (ABattleManager* M = GetManager()) M->StartDeploy(); }
 	void DoStartBattle() { if (ABattleManager* M = GetManager()) M->StartBattle(); }
 
+	// ── Army setup ────────────────────────────────────────────────────────
+	void DoStartArmySetup() { if (ABattleManager* M = GetManager()) M->StartArmySetup(); }
+	void DoConfirmArmies()  { if (ABattleManager* M = GetManager()) M->ConfirmArmiesAndDeploy(); }
+	void DoAddSquad(bool bPlayer, EUnitType T)    { if (ABattleManager* M = GetManager()) M->AddSquad(bPlayer, T); }
+	void DoRemoveSquad(bool bPlayer, EUnitType T) { if (ABattleManager* M = GetManager()) M->RemoveSquad(bPlayer, T); }
+	int32 SquadCount(bool bPlayer, EUnitType T) const
+	{
+		ABattleManager* M = GetManager();
+		return M ? M->GetSquadCount(bPlayer, T) : 0;
+	}
+	void ToggleAggressor() { if (ABattleManager* M = GetManager()) M->bEnemyIsAggressor = !M->bEnemyIsAggressor; }
+	bool EnemyAggressor() const { ABattleManager* M = GetManager(); return M ? M->bEnemyIsAggressor : true; }
+
 	void DoRestart()
 	{
 		if (World)
@@ -466,6 +589,66 @@ private:
 		if (World)
 			if (APlayerController* PC = World->GetFirstPlayerController())
 				PC->ConsoleCommand(TEXT("quit"));
+	}
+
+	// ── Time controls (HUD buttons mirror Space / [ / ]) ───────────────────
+	void DoTogglePause() { ToggleBattleSimPaused(); }
+	void DoSlower()      { StepBattleSimTimeScale(-1); }
+	void DoFaster()      { StepBattleSimTimeScale(+1); }
+
+	// ── Army-setup row: "Label: N" with − / + buttons ─────────────────────
+	TSharedRef<SWidget> MakeSquadRow(const FString& Label, bool bPlayer, EUnitType T)
+	{
+		auto MiniBtn = [this, bPlayer, T](const FString& Sym, bool bAdd) -> TSharedRef<SWidget>
+		{
+			return SNew(SButton)
+				.ContentPadding(0.f)
+				.ButtonColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.f))
+				.OnClicked_Lambda([this, bPlayer, T, bAdd]() -> FReply
+				{
+					if (bAdd) DoAddSquad(bPlayer, T); else DoRemoveSquad(bPlayer, T);
+					return FReply::Handled();
+				})
+				[
+					SNew(SBorder).Padding(FMargin(14.f, 4.f)).HAlign(HAlign_Center)
+					.BorderBackgroundColor(InactiveBtn)
+					[
+						SNew(STextBlock).Text(FText::FromString(Sym))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 16))
+						.ColorAndOpacity(FSlateColor(FLinearColor::White))
+					]
+				];
+		};
+		return SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 12.f, 0.f)
+			[
+				SNew(STextBlock).MinDesiredWidth(240.f)
+				.Text_Lambda([this, Label, bPlayer, T]() -> FText {
+					return FText::FromString(FString::Printf(TEXT("%s: %d"), *Label, SquadCount(bPlayer, T)));
+				})
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 16))
+				.ColorAndOpacity(FSlateColor(FLinearColor::White))
+			]
+			+ SHorizontalBox::Slot().AutoWidth().Padding(0.f, 0.f, 6.f, 0.f) [ MiniBtn(TEXT("-"), false) ]
+			+ SHorizontalBox::Slot().AutoWidth() [ MiniBtn(TEXT("+"), true) ];
+	}
+
+	// ── Small time-control button ──────────────────────────────────────────
+	TSharedRef<SWidget> MakeTimeButton(const FString& Sym, TFunction<void()> OnClick)
+	{
+		return SNew(SButton)
+			.ContentPadding(0.f)
+			.ButtonColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.f))
+			.OnClicked_Lambda([OnClick]() -> FReply { if (OnClick) OnClick(); return FReply::Handled(); })
+			[
+				SNew(SBorder).Padding(FMargin(13.f, 5.f)).HAlign(HAlign_Center)
+				.BorderBackgroundColor(InactiveBtn)
+				[
+					SNew(STextBlock).Text(FText::FromString(Sym))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 15))
+					.ColorAndOpacity(FSlateColor(FLinearColor::White))
+				]
+			];
 	}
 
 	// ── Big menu button (Graj / Wyjście / Restart) ────────────────────────
