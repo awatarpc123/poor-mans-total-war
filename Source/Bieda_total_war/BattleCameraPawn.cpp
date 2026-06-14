@@ -60,52 +60,88 @@ void ABattleCameraPawn::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// ── Draw selection ring ──────────────────────────────────────────────────
-	if (SelectedSpawner && !bIsDragging)
+	// ── Draw selection rings for all selected units ──────────────────────────
+	if (!bIsDragging)
 	{
-		const FVector Center = SelectedSpawner->GetFormationCenter();
-		DrawDebugCircle(GetWorld(), Center + FVector(0.f, 0.f, 5.f),
-			600.f, 48, FColor::Cyan, false, -1.f, 0, 4.f,
-			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
+		for (ABattleSpawnerActor* S : SelectedSpawners)
+		{
+			if (!S) continue;
+			const FColor RingColor = (S == SelectedSpawner) ? FColor::Cyan : FColor(0, 180, 255);
+			DrawDebugCircle(GetWorld(), S->GetFormationCenter() + FVector(0.f, 0.f, 5.f),
+				600.f, 48, RingColor, false, -1.f, 0, 4.f,
+				FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
+		}
 	}
 
-	// ── Drag-to-form preview ─────────────────────────────────────────────────
-	if (bLMBHeld && SelectedSpawner)
+	// ── LMB box-select rectangle preview ────────────────────────────────────
+	if (bLMBHeld)
 	{
 		FVector CursorPos;
 		if (GetGroundHitUnderCursor(CursorPos))
 		{
 			const float DragDist = (CursorPos - DragStartPos).Size2D();
-
 			if (DragDist > DragThreshold)
 			{
 				bIsDragging = true;
+				const float Z = 15.f;
+				const FVector CornerA(DragStartPos.X, DragStartPos.Y, Z);
+				const FVector CornerB(CursorPos.X,    DragStartPos.Y, Z);
+				const FVector CornerC(CursorPos.X,    CursorPos.Y,    Z);
+				const FVector CornerD(DragStartPos.X, CursorPos.Y,    Z);
+				DrawDebugLine(GetWorld(), CornerA, CornerB, FColor::White, false, -1.f, 0, 2.f);
+				DrawDebugLine(GetWorld(), CornerB, CornerC, FColor::White, false, -1.f, 0, 2.f);
+				DrawDebugLine(GetWorld(), CornerC, CornerD, FColor::White, false, -1.f, 0, 2.f);
+				DrawDebugLine(GetWorld(), CornerD, CornerA, FColor::White, false, -1.f, 0, 2.f);
+			}
+		}
+	}
 
-				const FVector DragDir    = (CursorPos - DragStartPos).GetSafeNormal2D();
-				const FVector LineCenter = (DragStartPos + CursorPos) * 0.5f;
+	// ── RMB drag-to-form preview ─────────────────────────────────────────────
+	if (bRMBHeld && !SelectedSpawners.IsEmpty())
+	{
+		FVector CursorPos;
+		if (GetGroundHitUnderCursor(CursorPos))
+		{
+			const float DragDist = (CursorPos - RMBDragStart).Size2D();
+			if (DragDist > DragThreshold)
+			{
+				bRMBDragging = true;
+				const FVector DragDir  = (CursorPos - RMBDragStart).GetSafeNormal2D();
+				const FVector FrontDir = -DragDir;
 
-				// Front faces AWAY along the drag: drag left→right and the unit looks
-				// the way you do; right→left and it faces back at you (Total War feel).
-				// Front line = negated drag direction. Preview must match the result.
-				const FVector FrontLineDir = -DragDir;
-
-				const int32 RowSize = FMath::Clamp(
-					FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
-					1, FMath::Max(1, SelectedSpawner->CountLiving()));   // live count, refreshes every frame
-
-				// Draw the drag line itself
 				DrawDebugLine(GetWorld(),
-					DragStartPos + FVector(0.f, 0.f, 10.f),
-					CursorPos + FVector(0.f, 0.f, 10.f),
+					RMBDragStart + FVector(0.f, 0.f, 10.f),
+					CursorPos    + FVector(0.f, 0.f, 10.f),
 					FColor::Green, false, -1.f, 0, 3.f);
 
-				// Draw formation preview
-				// NumAgents → CountLiving(): the dot count tracks LIVING soldiers and
-				// refreshes each frame, so the last row shrinks live as the unit takes
-				// casualties while you're still dragging (Total War feel).
-				DrawFormationPreview(LineCenter, RowSize,
-					SelectedSpawner->CountLiving(),
-					SelectedSpawner->SpawnSpacing, FrontLineDir);
+				if (SelectedSpawners.Num() == 1 && SelectedSpawner)
+				{
+					const int32 RowSize = FMath::Clamp(
+						FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
+						1, FMath::Max(1, SelectedSpawner->CountLiving()));
+					DrawFormationPreview((RMBDragStart + CursorPos) * 0.5f, RowSize,
+						SelectedSpawner->CountLiving(), SelectedSpawner->SpawnSpacing, FrontDir);
+				}
+				else
+				{
+					// Multiple units: show each squad distributed along the drag line.
+					int32 TotalLiving = 0;
+					for (ABattleSpawnerActor* S : SelectedSpawners) if (S) TotalLiving += S->CountLiving();
+					if (TotalLiving > 0)
+					{
+						float SegOffset = 0.f;
+						for (ABattleSpawnerActor* S : SelectedSpawners)
+						{
+							if (!S || S->CountLiving() <= 0) continue;
+							const float Frac  = (float)S->CountLiving() / TotalLiving;
+							const float Width = DragDist * Frac;
+							const int32 RowSize = FMath::Max(1, FMath::RoundToInt(Width / S->SpawnSpacing));
+							const FVector SegCenter = RMBDragStart + DragDir * (SegOffset + Width * 0.5f);
+							DrawFormationPreview(SegCenter, RowSize, S->CountLiving(), S->SpawnSpacing, FrontDir);
+							SegOffset += Width;
+						}
+					}
+				}
 			}
 		}
 	}
@@ -134,6 +170,8 @@ void ABattleCameraPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCo
 
 	EIC->BindAction(RMBAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnRMBStart);
 	EIC->BindAction(RMBAction,         ETriggerEvent::Completed, this, &ABattleCameraPawn::OnRMBEnd);
+	EIC->BindAction(MMBAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnMMBStart);
+	EIC->BindAction(MMBAction,         ETriggerEvent::Completed, this, &ABattleCameraPawn::OnMMBEnd);
 	EIC->BindAction(ESCAction,         ETriggerEvent::Started,   this, &ABattleCameraPawn::OnESCPress);
 	EIC->BindAction(PauseAction,       ETriggerEvent::Started,   this, &ABattleCameraPawn::OnPausePress);
 	EIC->BindAction(SlowerAction,      ETriggerEvent::Started,   this, &ABattleCameraPawn::OnSlowerPress);
@@ -165,6 +203,8 @@ void ABattleCameraPawn::BuildInputSetup()
 
 	RMBAction         = MakeAction(TEXT("BattleRMB"),         EInputActionValueType::Boolean);
 	RMBAction->Triggers.Add(NewObject<UInputTriggerDown>(this));
+	MMBAction         = MakeAction(TEXT("BattleMMB"),         EInputActionValueType::Boolean);
+	MMBAction->Triggers.Add(NewObject<UInputTriggerDown>(this));
 	ESCAction         = MakeAction(TEXT("BattleESC"),         EInputActionValueType::Boolean);
 	PauseAction       = MakeAction(TEXT("BattlePause"),       EInputActionValueType::Boolean);
 	SlowerAction      = MakeAction(TEXT("BattleSlower"),      EInputActionValueType::Boolean);
@@ -191,6 +231,7 @@ void ABattleCameraPawn::BuildInputSetup()
 
 	BattleIMC->MapKey(LMBAction,         EKeys::LeftMouseButton);
 	BattleIMC->MapKey(RMBAction,         EKeys::RightMouseButton);
+	BattleIMC->MapKey(MMBAction,         EKeys::MiddleMouseButton);
 	BattleIMC->MapKey(ESCAction,         EKeys::Escape);
 	BattleIMC->MapKey(PauseAction,       EKeys::SpaceBar);
 	BattleIMC->MapKey(SlowerAction,      EKeys::LeftBracket);
@@ -307,7 +348,7 @@ void ABattleCameraPawn::OnMoveUp(const FInputActionValue& Value)
 
 void ABattleCameraPawn::OnLook(const FInputActionValue& Value)
 {
-	if (!bRMBHeld) return;
+	if (!bMMBHeld) return;
 	const FVector2D Delta = Value.Get<FVector2D>();
 
 	AddControllerYawInput(Delta.X);
@@ -332,20 +373,147 @@ void ABattleCameraPawn::OnSpeedBoostEnd(const FInputActionValue& Value)
 		Move->MaxSpeed = NormalSpeed;
 }
 
-// ── RMB: hold to rotate camera ───────────────────────────────────────────────
+// ── MMB: hold to rotate camera ───────────────────────────────────────────────
 
-void ABattleCameraPawn::OnRMBStart(const FInputActionValue& Value)
+void ABattleCameraPawn::OnMMBStart(const FInputActionValue& Value)
 {
-	bRMBHeld = true;
+	bMMBHeld = true;
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		PC->SetShowMouseCursor(false);
 }
 
-void ABattleCameraPawn::OnRMBEnd(const FInputActionValue& Value)
+void ABattleCameraPawn::OnMMBEnd(const FInputActionValue& Value)
 {
-	bRMBHeld = false;
+	bMMBHeld = false;
 	if (APlayerController* PC = Cast<APlayerController>(GetController()))
 		PC->SetShowMouseCursor(true);
+}
+
+// ── RMB: issue orders (press = record, release = act) ────────────────────────
+
+void ABattleCameraPawn::OnRMBStart(const FInputActionValue& Value)
+{
+	if (bMMBHeld) return;
+	if (IsCursorOverUI()) return;
+
+	bRMBHeld     = true;
+	bRMBDragging = false;
+	if (!GetGroundHitUnderCursor(RMBDragStart)) return;
+
+	// Pressed on empty ground → halt all selected units now; the real move order
+	// comes on release so they don't run a stale order while we drag-to-form.
+	if (!SelectedSpawners.IsEmpty())
+	{
+		bool bOnUnit = false;
+		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+			if (It->GetClosestSoldierDistSq(RMBDragStart) < FMath::Square(SelectionRadius))
+			{ bOnUnit = true; break; }
+		if (!bOnUnit)
+			for (ABattleSpawnerActor* S : SelectedSpawners) if (S) S->HoldPosition();
+	}
+}
+
+void ABattleCameraPawn::OnRMBEnd(const FInputActionValue& Value)
+{
+	if (!bRMBHeld) { return; }
+	bRMBHeld = false;
+	if (IsCursorOverUI() || SelectedSpawners.IsEmpty()) { bRMBDragging = false; return; }
+
+	FVector CursorPos;
+	if (!GetGroundHitUnderCursor(CursorPos)) { bRMBDragging = false; return; }
+
+	const float DragDist = (CursorPos - RMBDragStart).Size2D();
+
+	// Resolve deploy phase once.
+	bool bDeploy = false;
+	FBox DeployZone;
+	for (TActorIterator<ABattleManager> It(GetWorld()); It; ++It)
+	{
+		if (It->GetGamePhase() == EGamePhase::Deploy) { bDeploy = true; DeployZone = It->GetDeployZone(0); }
+		break;
+	}
+	auto ClampDeploy = [&](FVector V) -> FVector {
+		if (bDeploy) { V.X = FMath::Clamp(V.X, DeployZone.Min.X, DeployZone.Max.X);
+		               V.Y = FMath::Clamp(V.Y, DeployZone.Min.Y, DeployZone.Max.Y); }
+		return V;
+	};
+
+	// ── DRAG: form units along the drag line ─────────────────────────────────
+	if (DragDist > DragThreshold)
+	{
+		const FVector DragDir  = (CursorPos - RMBDragStart).GetSafeNormal2D();
+		const FVector FrontDir = -DragDir;
+
+		if (SelectedSpawners.Num() == 1 && SelectedSpawner)
+		{
+			const int32 RowSize = FMath::Clamp(
+				FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
+				1, FMath::Max(1, SelectedSpawner->CountLiving()));
+			SelectedSpawner->IssueMoveOrder(
+				ClampDeploy((RMBDragStart + CursorPos) * 0.5f), RowSize, FrontDir, bDeploy);
+		}
+		else
+		{
+			// Shared front: distribute drag line proportionally by living count.
+			int32 TotalLiving = 0;
+			for (ABattleSpawnerActor* S : SelectedSpawners) if (S) TotalLiving += S->CountLiving();
+			if (TotalLiving > 0)
+			{
+				float SegOffset = 0.f;
+				for (ABattleSpawnerActor* S : SelectedSpawners)
+				{
+					if (!S || S->CountLiving() <= 0) continue;
+					const float Frac    = (float)S->CountLiving() / TotalLiving;
+					const float Width   = DragDist * Frac;
+					const int32 RowSize = FMath::Max(1, FMath::RoundToInt(Width / S->SpawnSpacing));
+					const FVector Seg   = RMBDragStart + DragDir * (SegOffset + Width * 0.5f);
+					S->IssueMoveOrder(ClampDeploy(Seg), RowSize, FrontDir, bDeploy);
+					SegOffset += Width;
+				}
+			}
+		}
+		bRMBDragging = false;
+		return;
+	}
+
+	bRMBDragging = false;
+
+	// ── CLICK in deploy: teleport primary unit to cursor ──────────────────────
+	if (bDeploy)
+	{
+		if (SelectedSpawner)
+			SelectedSpawner->IssueMoveOrder(ClampDeploy(CursorPos),
+				SelectedSpawner->GetCurrentRowSize(), FVector::ZeroVector, /*bInstant*/ true);
+		return;
+	}
+
+	// ── CLICK in battle: near enemy → engage all; otherwise group quick-move ──
+	ABattleSpawnerActor* BestEnemy = nullptr;
+	float BestEnemyDistSq = FMath::Square(SelectionRadius);
+	for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+	{
+		if (It->TeamId == 0) continue;
+		const float DistSq = It->GetClosestSoldierDistSq(CursorPos);
+		if (DistSq < BestEnemyDistSq) { BestEnemyDistSq = DistSq; BestEnemy = *It; }
+	}
+	if (BestEnemy)
+	{
+		for (ABattleSpawnerActor* S : SelectedSpawners) if (S) S->IssueEngageOrder(BestEnemy);
+		return;
+	}
+
+	// Quick-move: preserve each squad's relative offset from the group centre.
+	FVector GroupCenter = FVector::ZeroVector;
+	int32 Count = 0;
+	for (ABattleSpawnerActor* S : SelectedSpawners) if (S) { GroupCenter += S->GetFormationCenter(); ++Count; }
+	if (Count > 0) GroupCenter /= (float)Count;
+
+	for (ABattleSpawnerActor* S : SelectedSpawners)
+	{
+		if (!S) continue;
+		const FVector Offset = S->GetFormationCenter() - GroupCenter;
+		S->IssueMoveOrder(CursorPos + Offset, S->GetCurrentRowSize());
+	}
 }
 
 // ── ESC: deselect ────────────────────────────────────────────────────────────
@@ -353,6 +521,7 @@ void ABattleCameraPawn::OnRMBEnd(const FInputActionValue& Value)
 void ABattleCameraPawn::OnESCPress(const FInputActionValue& Value)
 {
 	SelectedSpawner = nullptr;
+	SelectedSpawners.Reset();
 }
 
 void ABattleCameraPawn::OnPausePress(const FInputActionValue& Value)
@@ -373,39 +542,16 @@ void ABattleCameraPawn::OnFasterPress(const FInputActionValue& Value)
 	StepBattleSimTimeScale(+1);   // ] → speed up the battle
 }
 
-// ── LMB: press → record, release → act ──────────────────────────────────────
+// ── LMB: press → record corner, release → box-select or single-select ────────
 
 void ABattleCameraPawn::OnLMBDown(const FInputActionValue& Value)
 {
-	if (bRMBHeld) return;
-	if (IsCursorOverUI()) return;   // let Slate buttons handle it
+	if (bMMBHeld) return;
+	if (IsCursorOverUI()) return;
 
 	bLMBHeld    = true;
 	bIsDragging = false;
-
-	if (!GetGroundHitUnderCursor(DragStartPos)) return;
-
-	// If a unit is selected and we clicked on empty ground (not on any formation),
-	// halt the unit immediately — the actual order comes on LMBUp (release).
-	// This prevents soldiers from executing a previous order while we drag-to-form.
-	if (SelectedSpawner)
-	{
-		bool bClickedOnUnit = false;
-		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
-		{
-			const float DistSq = It->GetClosestSoldierDistSq(DragStartPos);
-			if (DistSq < FMath::Square(SelectionRadius))
-			{
-				bClickedOnUnit = true;
-				break;
-			}
-		}
-
-		if (!bClickedOnUnit)
-		{
-			SelectedSpawner->HoldPosition();
-		}
-	}
+	GetGroundHitUnderCursor(DragStartPos);
 }
 
 void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
@@ -414,142 +560,54 @@ void ABattleCameraPawn::OnLMBUp(const FInputActionValue& Value)
 	bLMBHeld = false;
 	if (IsCursorOverUI()) { bIsDragging = false; return; }
 
-	// ── DRAG: issue move order with new formation ────────────────────────────
-	if (bIsDragging && SelectedSpawner)
+	FVector CursorPos;
+	if (!GetGroundHitUnderCursor(CursorPos)) { bIsDragging = false; return; }
+
+	if (bIsDragging)
 	{
-		FVector CursorPos;
-		if (GetGroundHitUnderCursor(CursorPos))
-		{
-			const FVector DragDir    = (CursorPos - DragStartPos).GetSafeNormal2D();
-			const float   DragDist  = (CursorPos - DragStartPos).Size2D();
-			const FVector LineCenter = (DragStartPos + CursorPos) * 0.5f;
-
-			const int32 RowSize = FMath::Clamp(
-				FMath::RoundToInt(DragDist / SelectedSpawner->SpawnSpacing),
-				1, FMath::Max(1, SelectedSpawner->CountLiving()));   // live count, refreshes every frame
-
-			// Green confirmation circle
-			DrawDebugCircle(GetWorld(), LineCenter + FVector(0.f, 0.f, 5.f),
-				300.f, 32, FColor::Green, false, 1.5f, 0, 4.f,
-				FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
-
-			// Front faces AWAY along the drag (negate) so the result matches the
-				// preview: drag left→right → unit looks the way you do (Total War feel).
-				FVector Center = LineCenter;
-				bool bDeploy = false;
-				for (TActorIterator<ABattleManager> It(GetWorld()); It; ++It)
-				{
-					if (It->GetGamePhase() == EGamePhase::Deploy)
-					{
-						bDeploy = true;
-						const FBox Z = It->GetDeployZone(0);
-						Center.X = FMath::Clamp(Center.X, Z.Min.X, Z.Max.X);
-						Center.Y = FMath::Clamp(Center.Y, Z.Min.Y, Z.Max.Y);
-					}
-					break;
-				}
-				// In Deploy: instant placement clamped to the player's zone; otherwise
-				// a normal move order. Front = negated drag (matches the preview).
-				SelectedSpawner->IssueMoveOrder(Center, RowSize, -DragDir, bDeploy);
-		}
-
-		bIsDragging = false;
-		return;
+		BoxSelect(DragStartPos, CursorPos);
 	}
-
+	else
+	{
+		// Single click: select nearest player squad within SelectionRadius.
+		ABattleSpawnerActor* Best = nullptr;
+		float BestDistSq = FMath::Square(SelectionRadius);
+		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+		{
+			if (It->TeamId != 0) continue;
+			const float D = It->GetClosestSoldierDistSq(CursorPos);
+			if (D < BestDistSq) { BestDistSq = D; Best = *It; }
+		}
+		if (Best)
+			SetSelectedSpawner(Best);
+		else
+		{
+			SelectedSpawner = nullptr;
+			SelectedSpawners.Reset();
+		}
+	}
 	bIsDragging = false;
+}
 
-	// ── SHORT CLICK: select or quick-move ────────────────────────────────────
-	FVector ClickPos;
-	if (!GetGroundHitUnderCursor(ClickPos)) return;
+void ABattleCameraPawn::BoxSelect(const FVector& GroundA, const FVector& GroundB)
+{
+	const float MinX = FMath::Min(GroundA.X, GroundB.X);
+	const float MaxX = FMath::Max(GroundA.X, GroundB.X);
+	const float MinY = FMath::Min(GroundA.Y, GroundB.Y);
+	const float MaxY = FMath::Max(GroundA.Y, GroundB.Y);
 
-	// Try to select a formation — pick the squad whose NEAREST soldier is
-	// closest to the click, within SelectionRadius. (Distance-to-centre failed
-	// on wide/deep formations: a click on a flank could be thousands of cm from
-	// the centre even while standing on a man.)
-	ABattleSpawnerActor* BestSpawner = nullptr;
-	float BestDistSq = FMath::Square(SelectionRadius);
+	SelectedSpawner = nullptr;
+	SelectedSpawners.Reset();
 
 	for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
 	{
 		if (It->TeamId != 0) continue;
-
-		const float DistSq = It->GetClosestSoldierDistSq(ClickPos);
-		if (DistSq < BestDistSq)
+		const FVector Centre = It->GetFormationCenter();
+		if (Centre.X >= MinX && Centre.X <= MaxX && Centre.Y >= MinY && Centre.Y <= MaxY)
 		{
-			BestDistSq  = DistSq;
-			BestSpawner = *It;
+			if (!SelectedSpawner) SelectedSpawner = *It;
+			SelectedSpawners.Add(*It);
 		}
-	}
-
-	if (BestSpawner)
-	{
-		SelectedSpawner = BestSpawner;
-
-		DrawDebugCircle(GetWorld(), BestSpawner->GetFormationCenter() + FVector(0.f, 0.f, 5.f),
-			600.f, 48, FColor::Cyan, false, 0.5f, 0, 4.f,
-			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
-		return;
-	}
-
-	// ── Deploy: a click on empty ground instantly places the selected unit ──
-	for (TActorIterator<ABattleManager> It(GetWorld()); It; ++It)
-	{
-		if (It->GetGamePhase() == EGamePhase::Deploy)
-		{
-			if (SelectedSpawner)
-			{
-				const FBox Z = It->GetDeployZone(0);
-				FVector C = ClickPos;
-				C.X = FMath::Clamp(C.X, Z.Min.X, Z.Max.X);
-				C.Y = FMath::Clamp(C.Y, Z.Min.Y, Z.Max.Y);
-				SelectedSpawner->IssueMoveOrder(C, SelectedSpawner->GetCurrentRowSize(),
-					FVector::ZeroVector, /*bInstant*/ true);
-			}
-			return;   // a click never engages while deploying
-		}
-		break;
-	}
-
-	// ── Check if click is near an enemy formation → engage ──────────────
-	if (SelectedSpawner)
-	{
-		ABattleSpawnerActor* BestEnemy = nullptr;
-		float BestEnemyDistSq = FMath::Square(SelectionRadius);
-
-		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
-		{
-			if (It->TeamId == 0) continue;   // skip friendly
-
-			const float DistSq = It->GetClosestSoldierDistSq(ClickPos);
-			if (DistSq < BestEnemyDistSq)
-			{
-				BestEnemyDistSq = DistSq;
-				BestEnemy       = *It;
-			}
-		}
-
-		if (BestEnemy)
-		{
-			// Red attack circle on the enemy
-			DrawDebugCircle(GetWorld(),
-				BestEnemy->GetFormationCenter() + FVector(0.f, 0.f, 5.f),
-				500.f, 32, FColor::Red, false, 1.5f, 0, 4.f,
-				FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
-
-			SelectedSpawner->IssueEngageOrder(BestEnemy);
-			return;
-		}
-	}
-
-	// Quick-move with current formation shape (clears engagement)
-	if (SelectedSpawner)
-	{
-		DrawDebugCircle(GetWorld(), ClickPos + FVector(0.f, 0.f, 5.f),
-			300.f, 32, FColor::Green, false, 1.5f, 0, 4.f,
-			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f));
-
-		SelectedSpawner->IssueMoveOrder(ClickPos);
 	}
 }
 

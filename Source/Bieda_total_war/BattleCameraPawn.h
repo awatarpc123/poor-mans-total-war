@@ -37,7 +37,13 @@ public:
 
 	/** Public getter/setter for HUD & UI. */
 	ABattleSpawnerActor* GetSelectedSpawner() const { return SelectedSpawner; }
-	void SetSelectedSpawner(ABattleSpawnerActor* S) { SelectedSpawner = S; }
+	void SetSelectedSpawner(ABattleSpawnerActor* S)
+	{
+		SelectedSpawner = S;
+		SelectedSpawners.Reset();
+		if (S) SelectedSpawners.Add(S);
+	}
+	const TArray<TObjectPtr<ABattleSpawnerActor>>& GetSelectedSpawners() const { return SelectedSpawners; }
 
 private:
 	// ── Input actions ────────────────────────────────────────────────────────
@@ -48,6 +54,7 @@ private:
 	UPROPERTY() TObjectPtr<UInputAction> SpeedBoostAction;
 	UPROPERTY() TObjectPtr<UInputAction> LMBAction;
 	UPROPERTY() TObjectPtr<UInputAction> RMBAction;
+	UPROPERTY() TObjectPtr<UInputAction> MMBAction;
 	UPROPERTY() TObjectPtr<UInputAction> ESCAction;
 	UPROPERTY() TObjectPtr<UInputAction> PauseAction;
 	UPROPERTY() TObjectPtr<UInputAction> SlowerAction;
@@ -58,22 +65,32 @@ private:
 	// ── State ────────────────────────────────────────────────────────────────
 	float NormalSpeed = 2000.f;
 	float TurboSpeed  = 6000.f;
-	bool  bRMBHeld    = false;
+	bool  bRMBHeld    = false;   // RMB held = issuing an order (drag-to-form)
+	bool  bMMBHeld    = false;   // MMB held = rotating the camera
 
 	// ── Unit selection ───────────────────────────────────────────────────────
+	// Primary (most-recently-picked) unit — drives the HUD panel.
 	UPROPERTY()
 	TObjectPtr<ABattleSpawnerActor> SelectedSpawner;
+
+	// Full selection (box-select). SelectedSpawner is the first of these.
+	UPROPERTY()
+	TArray<TObjectPtr<ABattleSpawnerActor>> SelectedSpawners;
 
 	// Max distance from the click to a squad's NEAREST soldier to select it.
 	// Measured to the closest man (not the formation centre), so it stays small —
 	// a click just has to land near someone in the unit, on any flank.
 	float SelectionRadius = 400.f;
 
-	// ── Drag-to-form state ───────────────────────────────────────────────────
+	// ── LMB box-select state ─────────────────────────────────────────────────
 	bool    bLMBHeld      = false;
 	bool    bIsDragging   = false;
-	FVector DragStartPos  = FVector::ZeroVector;   // ground position at LMB down
-	float   DragThreshold = 150.f;                 // cm on ground before drag activates
+	FVector DragStartPos  = FVector::ZeroVector;   // ground pos at LMB down (box corner)
+	float   DragThreshold = 150.f;                 // cm on ground before a drag activates
+
+	// ── RMB order-drag state (move / drag-to-form) ───────────────────────────
+	bool    bRMBDragging  = false;
+	FVector RMBDragStart  = FVector::ZeroVector;   // ground pos at RMB down
 
 	// ── Helpers ──────────────────────────────────────────────────────────────
 	void BuildInputSetup();
@@ -94,6 +111,11 @@ private:
 	void OnLMBUp        (const FInputActionValue& Value);
 	void OnRMBStart     (const FInputActionValue& Value);
 	void OnRMBEnd       (const FInputActionValue& Value);
+	void OnMMBStart     (const FInputActionValue& Value);
+	void OnMMBEnd       (const FInputActionValue& Value);
+
+	/** Select all player squads whose centre lies in the ground rectangle A..B. */
+	void BoxSelect(const FVector& GroundA, const FVector& GroundB);
 	void OnESCPress     (const FInputActionValue& Value);
 	void OnPausePress   (const FInputActionValue& Value);
 	void OnSlowerPress  (const FInputActionValue& Value);
