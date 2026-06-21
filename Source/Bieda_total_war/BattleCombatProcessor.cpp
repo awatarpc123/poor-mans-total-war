@@ -26,6 +26,15 @@ namespace
 		bool    bHit;
 	};
 
+	struct FMeleeDamageEvent
+	{
+		FMassEntityHandle Target;
+		float             HPDamage;
+		float             MoraleShock;
+	};
+
+	constexpr float MeleeRange = 200.f;   // cm — melee contact distance
+
 	// Friendly line-of-fire blocking (militia for now): a soldier won't fire if
 	// an ally stands in the narrow corridor between him and his target — so a
 	// rear-rank man only shoots when the man in front of him is gone (a "wyrwa"
@@ -54,6 +63,8 @@ void UBattleCombatProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 	CombatQuery.AddRequirement<FAgentStateFragment>(EMassFragmentAccess::ReadOnly);
 	CombatQuery.AddRequirement<FAgentCombatFragment>(EMassFragmentAccess::ReadWrite);
 	CombatQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
+	CombatQuery.AddRequirement<FFatigueFragment>(EMassFragmentAccess::ReadOnly);
+	CombatQuery.AddRequirement<FAgentVelocityFragment>(EMassFragmentAccess::ReadOnly);
 	CombatQuery.RegisterWithProcessor(*this);
 }
 
@@ -70,19 +81,22 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	TArray<FVector>           Positions;
 	TArray<FVector>           Forwards;
 	TArray<FMassEntityHandle> Handles;
+	TArray<bool>              ForceRunFlags;
 
 	CombatQuery.ForEachEntityChunk(Context,
-		[&Snaps, &Positions, &Forwards, &Handles](FMassExecutionContext& Ctx)
+		[&Snaps, &Positions, &Forwards, &Handles, &ForceRunFlags](FMassExecutionContext& Ctx)
 	{
 		const auto Transforms = Ctx.GetFragmentView<FTransformFragment>();
 		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
 		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
+		const auto Velocities = Ctx.GetFragmentView<FAgentVelocityFragment>();
 		const int32 N         = Ctx.GetNumEntities();
 
 		Snaps.Reserve(Snaps.Num() + N);
 		Positions.Reserve(Positions.Num() + N);
 		Forwards.Reserve(Forwards.Num() + N);
 		Handles.Reserve(Handles.Num() + N);
+		ForceRunFlags.Reserve(ForceRunFlags.Num() + N);
 
 		for (int32 i = 0; i < N; ++i)
 		{
@@ -91,6 +105,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			Forwards.Add(T.GetUnitAxis(EAxis::X));
 			Snaps.Add({ Factions[i].TeamId, States[i].State });
 			Handles.Add(Ctx.GetEntity(i));
+			ForceRunFlags.Add(Velocities[i].bForceRun);
 		}
 	});
 
@@ -112,15 +127,18 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	// -------------------------------------------------------------------
 	// Pass 1: target acquisition + damage collection
 	// -------------------------------------------------------------------
-	TArray<FBattleShotEvent> DamageEvents;
+	TArray<FBattleShotEvent>    DamageEvents;
+	TArray<FMeleeDamageEvent>   MeleeDamageEvents;
 	int32 GlobalIdx = 0;
 
 	CombatQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Ctx)
 	{
+		const float DeltaTime = Ctx.GetDeltaTimeSeconds() * BattleSimTimeScale();
 		auto       Transforms = Ctx.GetMutableFragmentView<FTransformFragment>();
 		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
 		auto       Combats    = Ctx.GetMutableFragmentView<FAgentCombatFragment>();
 		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
+		const auto Fatigues   = Ctx.GetFragmentView<FFatigueFragment>();
 
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i, ++GlobalIdx)
 		{
@@ -302,7 +320,9 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 				if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
 					TargetPos = Positions[*Found];
 
-				const bool bHit = FMath::FRand() < CF.Accuracy;
+				// Fatigue degrades accuracy: max -50% at fatigue=100
+				const float FatigueAccMult = FMath::Max(0.5f, 1.f - Fatigues[i].Fatigue * 0.005f);
+				const bool bHit = FMath::FRand() < CF.Accuracy * FatigueAccMult;
 				DamageEvents.Add({ CF.TargetEntity, MyPos, TargetPos, bHit });
 
 				CF.bHasAcquiredTarget = false;   // shot fired — clear target
@@ -311,6 +331,54 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			else
 			{
 				CF.bHasAcquiredTarget = false;
+			}
+
+			// ── Melee contact detection (every alive soldier) ───────────────
+			// Runs regardless of fire state. CombatProcessor sets bInMeleeContact;
+			// StateProcessor reads it next frame to transition into EAgentState::MELEE.
+			if (MyState != EAgentState::DEAD)
+			{
+				CF.bPrevMeleeContact = CF.bInMeleeContact;
+				CF.bInMeleeContact   = false;
+				Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float)
+				{
+					if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD)
+						CF.bInMeleeContact = true;
+				});
+
+				// First contact while charging → morale shock burst to nearby enemies
+				if (!CF.bPrevMeleeContact && CF.bInMeleeContact && ForceRunFlags[GlobalIdx])
+				{
+					constexpr float ChargeShock = 15.f;
+					Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float)
+					{
+						if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD)
+							MeleeDamageEvents.Add({ Handles[j], 0.f, ChargeShock });
+					});
+				}
+			}
+
+			// ── MELEE state: deal periodic melee hits ───────────────────────
+			if (MyState == EAgentState::MELEE)
+			{
+				CF.MeleeTimer += DeltaTime;
+				if (CF.MeleeTimer >= CF.MeleeAttackRate)
+				{
+					CF.MeleeTimer = 0.f;
+					int32 NearestEnemy  = INDEX_NONE;
+					float NearestDistSq = FMath::Square(MeleeRange);
+					Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float DistSq2D)
+					{
+						if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD
+							&& DistSq2D < NearestDistSq)
+						{
+							NearestDistSq = DistSq2D;
+							NearestEnemy  = j;
+						}
+					});
+					if (NearestEnemy != INDEX_NONE)
+						MeleeDamageEvents.Add({ Handles[NearestEnemy], CF.MeleeDamage, 0.f });
+				}
 			}
 		}
 	});
@@ -346,6 +414,36 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			const FColor  Color = Evt.bHit ? FColor::Red : FColor(255, 200, 0);
 			const float   Thick = Evt.bHit ? 2.5f : 1.f;
 			DrawDebugLine(World, Start, End, Color, false, 0.3f, 0, Thick);
+		}
+	}
+
+	// -------------------------------------------------------------------
+	// Pass 3: apply melee damage + charge morale shock
+	// -------------------------------------------------------------------
+	for (const FMeleeDamageEvent& Evt : MeleeDamageEvents)
+	{
+		if (!EntityManager.IsEntityValid(Evt.Target)) continue;
+
+		if (Evt.HPDamage > 0.f)
+		{
+			FAgentCombatFragment& TargetCF =
+				EntityManager.GetFragmentDataChecked<FAgentCombatFragment>(Evt.Target);
+			if (TargetCF.HP <= 0.f) continue;
+			TargetCF.HP -= Evt.HPDamage;
+			if (TargetCF.HP <= 0.f)
+			{
+				FAgentStateFragment& TargetSF =
+					EntityManager.GetFragmentDataChecked<FAgentStateFragment>(Evt.Target);
+				TargetSF.State      = EAgentState::DEAD;
+				TargetSF.StateTimer = 0.f;
+			}
+		}
+
+		if (Evt.MoraleShock > 0.f)
+		{
+			FMoraleFragment& TargetMF =
+				EntityManager.GetFragmentDataChecked<FMoraleFragment>(Evt.Target);
+			TargetMF.Morale = FMath::Max(0.f, TargetMF.Morale - Evt.MoraleShock);
 		}
 	}
 }

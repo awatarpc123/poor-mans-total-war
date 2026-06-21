@@ -17,7 +17,14 @@ namespace
 		EAgentState State;
 		uint8       TeamId;
 		uint8       SquadId;
+		FVector     Forward;   // facing direction — for flank detection
 	};
+
+	// Flank support constants
+	constexpr float FlankRadius       = 3000.f;   // cm — how far to look for flank support
+	constexpr float FlankDotThresh    = 0.3f;     // dot product threshold for left/right classification
+	constexpr float ExposedFlankDrain = 0.3f;     // morale/s per exposed flank
+	constexpr float FlankSupportBonus = 0.15f;    // morale/s per covered flank
 
 	struct FMoraleOfficerSnap
 	{
@@ -119,7 +126,8 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		for (int32 i = 0; i < N; ++i)
 		{
 			Positions.Add(Transforms[i].GetTransform().GetLocation());
-			Snaps.Add({ States[i].State, Factions[i].TeamId, Factions[i].SquadId });
+			Snaps.Add({ States[i].State, Factions[i].TeamId, Factions[i].SquadId,
+				Transforms[i].GetTransform().GetUnitAxis(EAxis::X) });
 		}
 	});
 
@@ -281,6 +289,47 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 				if (Off.bJustDied && DistSq < FMath::Square(2000.f))
 					Morale -= 30.f;
+			}
+
+			// ── Flank support / exposed flank ─────────────────────────────
+			// Check left and right perpendicular directions for friendly units
+			// from OTHER squads. An exposed flank drains morale; a covered one
+			// gives a small bonus. Only in stable combat states — routing soldiers
+			// don't think tactically.
+			if (MyState == EAgentState::HOLDING ||
+				MyState == EAgentState::LOADING ||
+				MyState == EAgentState::AIMING  ||
+				MyState == EAgentState::FIRING  ||
+				MyState == EAgentState::MELEE   ||
+				MyState == EAgentState::ADVANCING)
+			{
+				const FVector MyFwd  = Snaps[GlobalIdx].Forward.GetSafeNormal2D();
+				// LeftDir = forward rotated +90° (left of facing)
+				const FVector LeftDir(-MyFwd.Y, MyFwd.X, 0.f);
+
+				bool bLeftCovered  = false;
+				bool bRightCovered = false;
+
+				Grid.ForEachInRadius(MyPos, FlankRadius, GlobalIdx,
+					[&](int32 j, float DistSq2D)
+					{
+						if (Snaps[j].TeamId  != MyTeam)  return;
+						if (Snaps[j].SquadId == MySquad) return;  // own squad doesn't count
+						if (Snaps[j].State == EAgentState::DEAD    ||
+							Snaps[j].State == EAgentState::ROUTING  ||
+							Snaps[j].State == EAgentState::RALLYING) return;
+						if (DistSq2D > FMath::Square(FlankRadius)) return;
+
+						const FVector ToThem = (Positions[j] - MyPos).GetSafeNormal2D();
+						const float   DotL   = FVector::DotProduct(ToThem, LeftDir);
+						if      (DotL >  FlankDotThresh) bLeftCovered  = true;
+						else if (DotL < -FlankDotThresh) bRightCovered = true;
+					});
+
+				if (!bLeftCovered)  Morale -= ExposedFlankDrain * DT;
+				if (!bRightCovered) Morale -= ExposedFlankDrain * DT;
+				if (bLeftCovered)   Morale += FlankSupportBonus * DT;
+				if (bRightCovered)  Morale += FlankSupportBonus * DT;
 			}
 
 			Morale = FMath::Clamp(Morale, 0.f, 100.f);

@@ -159,7 +159,8 @@ void ABattleSpawnerActor::SpawnAgents()
 		FAgentVelocityFragment::StaticStruct(),
 		FAgentCombatFragment::StaticStruct(),
 		FOrderPropagationFragment::StaticStruct(),
-		FFactionFragment::StaticStruct()
+		FFactionFragment::StaticStruct(),
+		FFatigueFragment::StaticStruct()
 	};
 	FMassArchetypeHandle Archetype = EM.CreateArchetype(Fragments);
 

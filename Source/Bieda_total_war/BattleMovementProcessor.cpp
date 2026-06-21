@@ -30,6 +30,7 @@ void UBattleMovementProcessor::ConfigureQueries(const TSharedRef<FMassEntityMana
 	MovementQuery.AddRequirement<FOrderFragment>(EMassFragmentAccess::ReadOnly);
 	MovementQuery.AddRequirement<FAgentVelocityFragment>(EMassFragmentAccess::ReadWrite);
 	MovementQuery.AddRequirement<FMoraleFragment>(EMassFragmentAccess::ReadOnly);
+	MovementQuery.AddRequirement<FFatigueFragment>(EMassFragmentAccess::ReadWrite);
 	MovementQuery.RegisterWithProcessor(*this);
 }
 
@@ -76,6 +77,7 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 		const auto  Orders     = Ctx.GetFragmentView<FOrderFragment>();
 		auto        Velocities = Ctx.GetMutableFragmentView<FAgentVelocityFragment>();
 		const auto  Morales    = Ctx.GetFragmentView<FMoraleFragment>();
+		auto        Fatigues   = Ctx.GetMutableFragmentView<FFatigueFragment>();
 
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i, ++GlobalIdx)
 		{
@@ -260,6 +262,14 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 				const FVector Dir = ToTarget.GetSafeNormal2D();
 				const bool bIsLine = (Velocities[i].UnitType == EUnitType::LineInfantry);
 
+				// ── Fatigue accumulation ──────────────────────────────────
+				// Running builds fatigue; rest recovers it.
+				const bool bRunning = (Velocities[i].bForceRun || Velocities[i].bIsStraggler);
+				if (bRunning)
+					Fatigues[i].Fatigue = FMath::Min(100.f, Fatigues[i].Fatigue + 5.f * DeltaTime);
+				else
+					Fatigues[i].Fatigue = FMath::Max(0.f,   Fatigues[i].Fatigue - 2.f * DeltaTime);
+
 				// ── Choose speed: 3-tier system ───────────────────────────
 				// Priority 1: bIsStraggler  → CatchUpSpeed (auto, NCO grabbed him)
 				// Priority 2: bForceRun     → RunSpeed (UI: Bieg)
@@ -277,6 +287,8 @@ void UBattleMovementProcessor::Execute(FMassEntityManager& EntityManager, FMassE
 				{
 					BaseSpeed = Velocities[i].MarchSpeed;
 				}
+				// Fatigue speed penalty: max -30% at fatigue=100
+				BaseSpeed *= FMath::Max(0.7f, 1.f - Fatigues[i].Fatigue * 0.003f);
 
 				// ── Speed wavering — per-soldier amplitude ────────────────
 				const float WaverAmp = Velocities[i].PersonalWaverAmp;

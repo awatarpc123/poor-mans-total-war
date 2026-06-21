@@ -156,6 +156,13 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	// piece, so its first shot skips the long reload (HOLDING → AIMING straight
 	// away). Cleared after the first shot; every later cycle reloads normally.
 	bool bMusketLoaded       = true;
+
+	// ── Melee contact ────────────────────────────────────────────────────────
+	bool  bInMeleeContact   = false;   // set by CombatProcessor: enemy within MeleeRange
+	bool  bPrevMeleeContact = false;   // last frame's value — for first-contact charge shock
+	float MeleeTimer        = 0.f;     // time since last melee hit
+	float MeleeDamage       = 40.f;    // HP dealt per melee hit (~3 hits to kill)
+	float MeleeAttackRate   = 0.8f;    // seconds between melee hits
 };
 
 // ── Order propagation ────────────────────────────────────────────────────────
@@ -234,6 +241,17 @@ struct BIEDA_TOTAL_WAR_API FDrummerFragment : public FMassFragment
 	// Home position in formation (set by spawner on move order)
 	FVector FormationPos     = FVector::ZeroVector;
 	bool    bHasFormationPos = false;
+};
+
+// ── Fatigue ─────────────────────────────────────────────────────────────────
+
+USTRUCT()
+struct BIEDA_TOTAL_WAR_API FFatigueFragment : public FMassFragment
+{
+	GENERATED_BODY()
+	// Grows while running (bForceRun / bIsStraggler), decays at rest.
+	// Range 0-100. Penalises speed (max -30%) and accuracy (max -50%).
+	float Fatigue = 0.f;
 };
 
 // ── Faction ─────────────────────────────────────────────────────────────────

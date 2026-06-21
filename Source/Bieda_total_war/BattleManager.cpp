@@ -193,11 +193,20 @@ void ABattleManager::Think()
 	// closes in. No advancing.
 	if (!bEnemyIsAggressor) return;
 
-	// Aggressor: each idle squad picks a target, spreading attacks across the
-	// player's squads (fewest attackers first, then nearest) instead of all
-	// piling onto one. Sprint when far, march when close enough to fire in order.
+	// Aggressor: pick targets with priority: spread attacks → exposed flanks → weakened squads → nearest.
 	TMap<ABattleSpawnerActor*, int32> Attackers;
 	for (ABattleSpawnerActor* T : PlayerSquads) Attackers.Add(T, 0);
+
+	// Identify the player line's left and right flank squads (extreme Y positions).
+	// A squad within FlankDetectRadius of an extreme counts as an exposed flank.
+	constexpr float FlankDetectRadius = 3000.f;
+	float MinY = FLT_MAX, MaxY = -FLT_MAX;
+	for (ABattleSpawnerActor* T : PlayerSquads)
+	{
+		const float Y = T->GetFormationCenter().Y;
+		MinY = FMath::Min(MinY, Y);
+		MaxY = FMath::Max(MaxY, Y);
+	}
 
 	for (ABattleSpawnerActor* Enemy : EnemySquads)
 	{
@@ -214,18 +223,34 @@ void ABattleManager::Think()
 		const FVector EnemyCentre = Enemy->GetFormationCenter();
 		ABattleSpawnerActor* Best = nullptr;
 		float BestScore = FLT_MAX;
+
 		for (ABattleSpawnerActor* Target : PlayerSquads)
 		{
-			const float Dist = FMath::Sqrt((Target->GetFormationCenter() - EnemyCentre).SizeSquared2D());
-			// Spread out first (each existing attacker is a heavy penalty), then nearest.
-			const float Score = Attackers[Target] * 1.0e6f + Dist;
+			const FVector TC   = Target->GetFormationCenter();
+			const float   Dist = FMath::Sqrt((TC - EnemyCentre).SizeSquared2D());
+
+			// Priority 1 (dominant): spread — avoid piling onto the same squad.
+			const float SpreadPenalty = Attackers[Target] * 1.0e6f;
+
+			// Priority 2: flank attack — squads at line extremes are harder to support.
+			const bool  bIsFlank    = (TC.Y < MinY + FlankDetectRadius) || (TC.Y > MaxY - FlankDetectRadius);
+			const float FlankBonus  = bIsFlank ? -200000.f : 0.f;
+
+			// Priority 3: weakness — bloodied squads break faster under pressure.
+			const float StrengthRatio  = (Target->NumAgents > 0)
+				? FMath::Clamp((float)Target->CountLiving() / (float)Target->NumAgents, 0.f, 1.f)
+				: 1.f;
+			const float WeaknessBonus = -(1.f - StrengthRatio) * 100000.f;
+
+			// Priority 4 (tiebreaker): distance.
+			const float Score = SpreadPenalty + FlankBonus + WeaknessBonus + Dist;
 			if (Score < BestScore) { BestScore = Score; Best = Target; }
 		}
 
 		if (Best)
 		{
 			const float Dist = FMath::Sqrt((Best->GetFormationCenter() - EnemyCentre).SizeSquared2D());
-			Enemy->SetForceRun(Dist > AIRunDistance);   // sprint when far, march when close
+			Enemy->SetForceRun(Dist > AIRunDistance);
 			Enemy->IssueEngageOrder(Best);
 			++Attackers[Best];
 		}

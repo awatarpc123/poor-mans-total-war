@@ -66,7 +66,12 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			switch (SF.State)
 			{
 			case EAgentState::ADVANCING:
-				if (!OF.bHasTarget)
+				if (CF.bInMeleeContact)
+				{
+					SF.State      = EAgentState::MELEE;
+					SF.StateTimer = 0.f;
+				}
+				else if (!OF.bHasTarget)
 				{
 					SF.State     = EAgentState::HOLDING;
 					SF.StateTimer = 0.f;
@@ -84,6 +89,12 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				break;
 
 			case EAgentState::HOLDING:
+				if (CF.bInMeleeContact)
+				{
+					SF.State      = EAgentState::MELEE;
+					SF.StateTimer = 0.f;
+					break;
+				}
 				if (SF.StateTimer >= 2.f)
 				{
 					// Musket already loaded (e.g. fresh unit marching into battle)
@@ -208,6 +219,15 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			}
 
 			case EAgentState::MELEE:
+				// Slow morale drain from hand-to-hand fighting
+				MF.Morale = FMath::Max(0.f, MF.Morale - 2.f * DT);
+				if (!CF.bInMeleeContact)
+				{
+					SF.State      = EAgentState::HOLDING;
+					SF.StateTimer = 0.f;
+				}
+				break;
+
 			case EAgentState::PINNED:
 				break;
 			}
