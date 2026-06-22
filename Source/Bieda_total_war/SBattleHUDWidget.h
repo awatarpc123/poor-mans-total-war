@@ -341,7 +341,7 @@ public:
 							.HAlign(HAlign_Center).VAlign(VAlign_Center)
 							.BorderBackgroundColor_Lambda([this]() -> FSlateColor {
 								return BattleSimPaused()
-									? FSlateColor(FLinearColor(0.769f, 0.604f, 0.180f, 0.85f))
+									? FSlateColor(BTW::GoldDim)
 									: FSlateColor(BTW::Border2);
 							})
 							[
@@ -577,7 +577,7 @@ public:
 								.Padding(FMargin(18.f, 6.f))
 								.BorderBackgroundColor_Lambda([this]() -> FSlateColor {
 									return EnemyAggressor()
-										? FSlateColor(FLinearColor(0.608f, 0.125f, 0.125f, 0.55f))
+										? FSlateColor(BTW::Red)
 										: FSlateColor(BTW::Border2);
 								})
 								[
@@ -605,7 +605,7 @@ public:
 								.Padding(FMargin(18.f, 6.f))
 								.BorderBackgroundColor_Lambda([this]() -> FSlateColor {
 									return !EnemyAggressor()
-										? FSlateColor(FLinearColor(0.122f, 0.431f, 0.749f, 0.55f))
+										? FSlateColor(BTW::Blue)
 										: FSlateColor(BTW::Border2);
 								})
 								[
@@ -827,9 +827,9 @@ private:
 					.Padding(FMargin(9.f, 5.f))
 					.HAlign(HAlign_Center)
 					.BorderBackgroundColor_Lambda([this, Idx, bA]() -> FSlateColor {
-						if (bA) return FSlateColor(FLinearColor(0.478f, 0.243f, 0.055f, 0.85f));
+						if (bA) return FSlateColor(BTW::Orange);
 						return IsCommandActive(Idx)
-							? FSlateColor(FLinearColor(0.122f, 0.431f, 0.749f, 0.55f))
+							? FSlateColor(BTW::Blue)
 							: FSlateColor(BTW::Border2);
 					})
 					[
@@ -925,10 +925,10 @@ private:
 							const FString St = Spawner->GetDominantStateString();
 							const bool bRout = (St == TEXT("PANIKA!"));
 							if (GetSelectedSpawner() == Spawner)
-								return FSlateColor(FLinearColor(0.122f, 0.431f, 0.749f, 0.55f));
+								return FSlateColor(BTW::Blue);
 							if (bRout)
-								return FSlateColor(FLinearColor(0.608f, 0.125f, 0.125f, 0.45f));
-							return FSlateColor(FLinearColor(0.04f, 0.04f, 0.07f, 0.93f));
+								return FSlateColor(BTW::Red);
+							return FSlateColor(FLinearColor(0.04f, 0.04f, 0.07f, 1.f));
 						})
 						[
 							SNew(SVerticalBox)
@@ -1040,7 +1040,7 @@ private:
 				SNew(SBorder)
 				.Padding(FMargin(38.f, 12.f))
 				.HAlign(HAlign_Center)
-				.BorderBackgroundColor(FLinearColor(0.769f, 0.604f, 0.180f, 0.18f))
+				.BorderBackgroundColor(FLinearColor(0.12f, 0.10f, 0.04f, 1.f))
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(Label))
@@ -1079,8 +1079,8 @@ private:
 				.Padding(FMargin(0.f, 10.f))
 				.HAlign(HAlign_Center)
 				.BorderBackgroundColor(bPrimary
-					? FLinearColor(0.122f, 0.431f, 0.749f, 0.35f)
-					: FLinearColor(0.04f, 0.04f, 0.07f, 0.93f))
+					? FLinearColor(0.122f, 0.431f, 0.749f, 1.f)
+					: FLinearColor(0.06f, 0.06f, 0.10f, 1.f))
 				[
 					SNew(STextBlock)
 					.Text(FText::FromString(Label))
