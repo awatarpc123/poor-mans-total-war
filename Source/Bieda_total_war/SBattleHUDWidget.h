@@ -18,6 +18,14 @@
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/PlayerController.h"
 
+// ── Solid brush for SBorder background fills ─────────────────────────────────
+// SBorder only renders colour when it has a non-null BorderImage to tint.
+// FCoreStyle's "White" brush is a 1×1 white pixel — tinted by BorderBackgroundColor.
+inline const FSlateBrush* SolidBrush()
+{
+	return FCoreStyle::Get().GetBrush("White");
+}
+
 // ── Palette (matches btw_ui_kit.html CSS vars) ────────────────────────────────
 namespace BTW
 {
@@ -82,6 +90,7 @@ public:
 				+ SVerticalBox::Slot().AutoHeight()
 				[
 					SNew(SBorder)
+					.BorderImage(SolidBrush())
 					.BorderBackgroundColor(BTW::Panel)
 					.Padding(0.f)
 					[
@@ -227,7 +236,8 @@ public:
 					SNew(SBox).WidthOverride(380.f)
 					[
 						SNew(SBorder)
-						.BorderBackgroundColor(BTW::Panel)
+						.BorderImage(SolidBrush())
+					.BorderBackgroundColor(BTW::Panel)
 						.Padding(0.f)
 						[
 							SNew(SVerticalBox)
@@ -378,6 +388,7 @@ public:
 			+ SOverlay::Slot()
 			[
 				SNew(SBorder)
+				.BorderImage(SolidBrush())
 				.BorderBackgroundColor(BTW::Bg)
 				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
 				.Visibility_Lambda([this]() {
@@ -505,6 +516,7 @@ public:
 			+ SOverlay::Slot()
 			[
 				SNew(SBorder)
+				.BorderImage(SolidBrush())
 				.BorderBackgroundColor(BTW::Bg)
 				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
 				.Visibility_Lambda([this]() {
