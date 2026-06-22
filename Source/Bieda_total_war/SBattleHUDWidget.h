@@ -780,6 +780,12 @@ private:
 	void DoRemoveSquad(bool bPlayer, EUnitType T) { if (ABattleManager* M = GetManager()) M->RemoveSquad(bPlayer, T); }
 	int32 SquadCount(bool bPlayer, EUnitType T) const { ABattleManager* M = GetManager(); return M ? M->GetSquadCount(bPlayer, T) : 0; }
 	bool EnemyAggressor() const { ABattleManager* M = GetManager(); return M ? M->bEnemyIsAggressor : true; }
+	int32 SoldiersPerSquad(EUnitType T) const
+	{
+		ABattleManager* M = GetManager();
+		if (!M) return 50;
+		return (T == EUnitType::LineInfantry) ? M->LineSoldiersPerSquad : M->MilitiaSoldiersPerSquad;
+	}
 
 	void DoRestart()
 	{
@@ -1141,7 +1147,8 @@ private:
 							.ColorAndOpacity(FSlateColor(FLinearColor(TitleCol.R, TitleCol.G, TitleCol.B, 0.7f)))
 							.Text_Lambda([this, bPlayer]() -> FText {
 								const int32 Total = (SquadCount(bPlayer, EUnitType::Militia)
-									+ SquadCount(bPlayer, EUnitType::LineInfantry)) * 50;
+									* SoldiersPerSquad(EUnitType::Militia))
+									+ (SquadCount(bPlayer, EUnitType::LineInfantry) * SoldiersPerSquad(EUnitType::LineInfantry));
 								return FText::FromString(FString::Printf(TEXT("%d żołnierzy"), Total));
 							})
 						]
@@ -1153,10 +1160,10 @@ private:
 				[
 					SNew(SVerticalBox)
 					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 0.f, 0.f, 6.f)
-					[ MakeUnitRow(TEXT("Milicja"), TEXT("50 żołnierzy / oddział · niskie morale"),
+					[ MakeUnitRow(TEXT("Milicja"), TEXT("150 żołnierzy / oddział \xB7 niskie morale"),
 						bPlayer, EUnitType::Militia) ]
 					+ SVerticalBox::Slot().AutoHeight()
-					[ MakeUnitRow(TEXT("Piechota Liniowa"), TEXT("50 żołnierzy / oddział · salwy rangowe"),
+					[ MakeUnitRow(TEXT("Piechota Liniowa"), TEXT("120 żołnierzy / oddział \xB7 salwy rangowe"),
 						bPlayer, EUnitType::LineInfantry) ]
 				]
 
@@ -1182,7 +1189,8 @@ private:
 							.ColorAndOpacity(FSlateColor(TotalCol))
 							.Text_Lambda([this, bPlayer]() -> FText {
 								const int32 Total = (SquadCount(bPlayer, EUnitType::Militia)
-									+ SquadCount(bPlayer, EUnitType::LineInfantry)) * 50;
+									* SoldiersPerSquad(EUnitType::Militia))
+									+ (SquadCount(bPlayer, EUnitType::LineInfantry) * SoldiersPerSquad(EUnitType::LineInfantry));
 								return FText::FromString(FString::FromInt(Total));
 							})
 						]

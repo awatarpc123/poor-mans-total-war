@@ -86,9 +86,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "0"))
 	float AIRunDistance = 8000.f;
 
-	/** Soldiers in each squad spawned from the army-setup screen. */
+	/** Soldiers per Militia squad spawned from the army-setup screen. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "1"))
-	int32 SoldiersPerSquad = 50;
+	int32 MilitiaSoldiersPerSquad = 150;
+
+	/** Soldiers per Line Infantry squad spawned from the army-setup screen. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|AI", meta = (ClampMin = "1"))
+	int32 LineSoldiersPerSquad = 120;
 
 	/** Current outcome — Ongoing until one side is wiped. Read by the HUD. */
 	EBattleOutcome GetOutcome() const { return Outcome; }

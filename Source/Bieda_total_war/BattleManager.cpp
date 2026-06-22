@@ -111,7 +111,7 @@ void ABattleManager::SpawnSideArmy(uint8 ForTeamId, float YawDeg, int32 NumMilit
 			ABattleSpawnerActor::StaticClass(), Xf);
 		if (!S) continue;
 		S->UnitType    = Type;
-		S->NumAgents   = SoldiersPerSquad;
+		S->NumAgents   = (Type == EUnitType::LineInfantry) ? LineSoldiersPerSquad : MilitiaSoldiersPerSquad;
 		S->TeamId      = ForTeamId;
 		S->SpawnFacing = Facing;
 		UGameplayStatics::FinishSpawningActor(S, Xf);
