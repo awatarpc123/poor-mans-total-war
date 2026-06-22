@@ -21,8 +21,8 @@
 // ── Palette (matches btw_ui_kit.html CSS vars) ────────────────────────────────
 namespace BTW
 {
-	static const FLinearColor Bg         = FLinearColor(0.027f, 0.035f, 0.055f, 0.98f);  // #07090E
-	static const FLinearColor Panel      = FLinearColor(0.027f, 0.035f, 0.055f, 0.93f);
+	static const FLinearColor Bg         = FLinearColor(0.027f, 0.035f, 0.055f, 1.f);  // #07090E
+	static const FLinearColor Panel      = FLinearColor(0.027f, 0.035f, 0.055f, 1.f);
 	static const FLinearColor Border     = FLinearColor(0.118f, 0.125f, 0.188f, 1.f);    // #1E2030
 	static const FLinearColor Border2    = FLinearColor(0.172f, 0.188f, 0.314f, 1.f);    // #2C3050
 	static const FLinearColor Gold       = FLinearColor(0.769f, 0.604f, 0.180f, 1.f);    // #C49A2E
@@ -217,7 +217,7 @@ public:
 			+ SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
 			[
 				SNew(SBorder)
-				.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 0.72f))
+				.BorderBackgroundColor(FLinearColor(0.f, 0.f, 0.f, 1.f))
 				.HAlign(HAlign_Fill).VAlign(VAlign_Fill)
 				.Visibility_Lambda([this]() {
 					return GetOutcome() != EBattleOutcome::Ongoing
