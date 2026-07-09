@@ -32,7 +32,12 @@ private:
 	FMassEntityQuery OfficerQuery;   // read officer aura data
 
 	// Radii (cm)
-	static constexpr float RoutingRadius = 1000.f;   // panic contagion reach (was 1500 — 15m was too far)
+	// Panic contagion reach is direction-dependent: a router fleeing TOWARD you
+	// is visible and terrifying from farther away than one off to your side.
+	// Ratio ~2.5 matches Empire: Total War's routing_unit_effect_distance_front
+	// (75) / _flank (30) kv-table constants.
+	static constexpr float RoutingRadiusFront = 1400.f;
+	static constexpr float RoutingRadiusFlank =  550.f;
 	static constexpr float DeadRadius    =  500.f;
 	static constexpr float StableRadius  = 1000.f;
 

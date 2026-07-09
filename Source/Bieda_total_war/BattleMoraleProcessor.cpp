@@ -134,7 +134,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	if (Snaps.IsEmpty()) return;
 
 	FBattleSpatialGrid Grid;
-	Grid.Build(Positions, RoutingRadius);
+	Grid.Build(Positions, RoutingRadiusFront);
 
 	const float DT = Context.GetDeltaTimeSeconds() * BattleSimTimeScale();
 
@@ -225,7 +225,9 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 			float ShakenDrain = 0.f;
 
-			Grid.ForEachInRadius(MyPos, RoutingRadius, GlobalIdx,
+			const FVector MyForwardN = Snaps[GlobalIdx].Forward.GetSafeNormal2D();
+
+			Grid.ForEachInRadius(MyPos, RoutingRadiusFront, GlobalIdx,
 				[&](int32 j, float DistSq2D)
 				{
 					if (Snaps[j].TeamId != MyTeam) return;
@@ -234,11 +236,18 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					{
 					case EAgentState::ROUTING:
 					{
+						// Direction-dependent reach: a router fleeing toward your
+						// front is visible/scary from farther away than one off
+						// to your flank (ETW routing_unit_effect_distance_front/flank).
+						const FVector ToRouter  = (Positions[j] - MyPos).GetSafeNormal2D();
+						const float   Frontality = FVector::DotProduct(MyForwardN, ToRouter);
+						const float   EffRadius  = (Frontality > FlankDotThresh)
+							? RoutingRadiusFront : RoutingRadiusFlank;
+						if (DistSq2D >= FMath::Square(EffRadius)) break;
+
 						// Distance-weighted contagion: a router right next to you
-						// is terrifying; one across the field barely registers.
-						// Linear falloff over RoutingRadius makes panic ripple
-						// back rank-by-rank instead of hitting the whole unit.
-						const float Falloff = 1.f - FMath::Sqrt(DistSq2D) / RoutingRadius;
+						// is terrifying; one at the edge of range barely registers.
+						const float Falloff = 1.f - FMath::Sqrt(DistSq2D) / EffRadius;
 						RoutingDrain += RoutingDrainRate * FMath::Max(0.f, Falloff);
 						break;
 					}

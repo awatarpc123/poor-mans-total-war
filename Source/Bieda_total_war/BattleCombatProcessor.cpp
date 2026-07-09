@@ -24,6 +24,7 @@ namespace
 		FVector ShooterPos;
 		FVector TargetPos;
 		bool    bHit;
+		float   DirShock = 0.f;   // extra instant morale hit from a flank/rear shot
 	};
 
 	struct FMeleeDamageEvent
@@ -34,6 +35,16 @@ namespace
 	};
 
 	constexpr float MeleeRange = 200.f;   // cm — melee contact distance
+
+	// Directional hit shock — being hit from the flank/rear is more
+	// demoralizing than a hit you saw coming from the front (ETW:
+	// was_attacked_in_front=0 / _flank=-3 / _rear=-5, ratio ~1 : 1.7).
+	// FrontDotThresh/FlankDotThresh split the 180° arc facing the shooter
+	// into front (shooter roughly where you're looking) / flank / rear.
+	constexpr float RearHitDotThresh  =  0.5f;    // dot(AttackDir, TargetForward) above this = rear hit
+	constexpr float FrontHitDotThresh = -0.5f;    // below this = front hit; between = flank
+	constexpr float FlankHitShock     = 4.f;
+	constexpr float RearHitShock      = 8.f;
 
 	// Friendly line-of-fire blocking (militia for now): a soldier won't fire if
 	// an ally stands in the narrow corridor between him and his target — so a
@@ -317,13 +328,30 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			{
 				// Target position for the shot/debug line (O(1) map lookup)
 				FVector TargetPos = MyPos + MyForward * CF.FireRange;
+				int32   TargetIdx = INDEX_NONE;
 				if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
-					TargetPos = Positions[*Found];
+				{
+					TargetIdx = *Found;
+					TargetPos = Positions[TargetIdx];
+				}
 
 				// Fatigue degrades accuracy: max -50% at fatigue=100
 				const float FatigueAccMult = FMath::Max(0.5f, 1.f - Fatigues[i].Fatigue * 0.005f);
 				const bool bHit = FMath::FRand() < CF.Accuracy * FatigueAccMult;
-				DamageEvents.Add({ CF.TargetEntity, MyPos, TargetPos, bHit });
+
+				// Directional shock: a hit from the flank/rear rattles the victim
+				// more than one taken from the front (see RearHitShock/FlankHitShock).
+				float DirShock = 0.f;
+				if (bHit && TargetIdx != INDEX_NONE)
+				{
+					const FVector TargetForward = Forwards[TargetIdx].GetSafeNormal2D();
+					const FVector AttackDir     = (TargetPos - MyPos).GetSafeNormal2D();
+					const float   Dot           = FVector::DotProduct(AttackDir, TargetForward);
+					if (Dot > RearHitDotThresh)       DirShock = RearHitShock;
+					else if (Dot > FrontHitDotThresh) DirShock = FlankHitShock;
+				}
+
+				DamageEvents.Add({ CF.TargetEntity, MyPos, TargetPos, bHit, DirShock });
 
 				CF.bHasAcquiredTarget = false;   // shot fired — clear target
 			}
@@ -377,7 +405,17 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 						}
 					});
 					if (NearestEnemy != INDEX_NONE)
-						MeleeDamageEvents.Add({ Handles[NearestEnemy], CF.MeleeDamage, 0.f });
+					{
+						// Directional shock, same rule as ranged hits.
+						float DirShock = 0.f;
+						const FVector TargetForward = Forwards[NearestEnemy].GetSafeNormal2D();
+						const FVector AttackDir     = (Positions[NearestEnemy] - MyPos).GetSafeNormal2D();
+						const float   Dot           = FVector::DotProduct(AttackDir, TargetForward);
+						if (Dot > RearHitDotThresh)       DirShock = RearHitShock;
+						else if (Dot > FrontHitDotThresh) DirShock = FlankHitShock;
+
+						MeleeDamageEvents.Add({ Handles[NearestEnemy], CF.MeleeDamage, DirShock });
+					}
 				}
 			}
 		}
@@ -403,6 +441,12 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 					EntityManager.GetFragmentDataChecked<FAgentStateFragment>(Evt.Target);
 				TargetSF.State      = EAgentState::DEAD;
 				TargetSF.StateTimer = 0.f;
+			}
+			else if (Evt.DirShock > 0.f)
+			{
+				FMoraleFragment& TargetMF =
+					EntityManager.GetFragmentDataChecked<FMoraleFragment>(Evt.Target);
+				TargetMF.Morale = FMath::Max(0.f, TargetMF.Morale - Evt.DirShock);
 			}
 		}
 

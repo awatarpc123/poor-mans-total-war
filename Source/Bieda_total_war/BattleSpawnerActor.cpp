@@ -22,6 +22,17 @@ ABattleSpawnerActor::ABattleSpawnerActor()
 
 	USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	RootComponent = Root;
+
+	// NOTE: Soldier_20K (from Infantry20K.fbx) is a SKELETAL mesh (imported with
+	// its rig intact) — HISM can only render STATIC meshes, so it can't be used
+	// here. Soldier_Retopo is the same retopologized model line but imported as
+	// a plain static mesh (40k tris, no bones).
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SoldierMeshFinder(
+		TEXT("/Game/Models/Soldier_Retopo.Soldier_Retopo"));
+	if (SoldierMeshFinder.Succeeded())
+	{
+		SoldierMesh = SoldierMeshFinder.Object;
+	}
 }
 
 void ABattleSpawnerActor::BeginPlay()
@@ -999,6 +1010,7 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 		if (SoldierWasAlive[i] && !bAlive)
 		{
 			ShockSources.Add({ Pos, ShockPerDeath * ShockLossScale });
+			ExtendedCasualtyAccum += 1.f;
 		}
 		SoldierWasAlive[i] = bAlive;
 	}
@@ -1011,6 +1023,13 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 			ShockSources.RemoveAtSwap(s);
 	}
 
+	// Extended-casualty accumulator: decays slowly (independent of the fast,
+	// local ShockSources) so a STEADY trickle of deaths keeps outpacing the
+	// decay and builds a lingering squad-wide drain — a sudden salvo (handled
+	// by ShockSources) and the permanent ceiling (AttritionCeilingPenalty) are
+	// separate mechanisms; this is the third, "sustained bleeding" timeframe.
+	ExtendedCasualtyAccum = FMath::Max(0.f, ExtendedCasualtyAccum - ExtendedCasualtyDecayRate * DeltaSeconds);
+
 	// ── Attrition ceiling (squad-wide, quadratic in losses) ─────────────────
 	const float LossRatio = 1.f - (static_cast<float>(AliveNow) /
 		static_cast<float>(InitialSoldierCount));
@@ -1018,7 +1037,7 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 		100.f - AttritionCeilingPenalty * LossRatio * LossRatio, 0.f, 100.f);
 
 	const bool bHaveShocks = ShockSources.Num() > 0;
-	if (!bHaveShocks && Ceiling >= 100.f) return;   // nothing to apply this frame
+	if (!bHaveShocks && Ceiling >= 100.f && ExtendedCasualtyAccum <= 0.f) return;   // nothing to apply this frame
 
 	const float FalloffSq = ShockFalloffRadius * ShockFalloffRadius;
 
@@ -1045,6 +1064,11 @@ void ABattleSpawnerActor::UpdateCasualtyShock(float DeltaSeconds)
 		}
 		if (Drain > 0.f)
 			MF.Morale = FMath::Max(0.f, MF.Morale - Drain * DeltaSeconds);
+
+		// Extended-casualty drain — sustained losses over time, squad-wide,
+		// independent of position (unlike the local ShockSources above).
+		if (ExtendedCasualtyAccum > 0.f)
+			MF.Morale = FMath::Max(0.f, MF.Morale - ExtendedCasualtyDrainRate * ExtendedCasualtyAccum * DeltaSeconds);
 
 		// Attrition ceiling — morale can't sit above what the losses allow.
 		if (MF.Morale > Ceiling)
@@ -1762,10 +1786,10 @@ UStaticMesh* ABattleSpawnerActor::GetFallbackMesh() const
 	return CachedMesh;
 }
 
-UHierarchicalInstancedStaticMeshComponent* ABattleSpawnerActor::CreateHISM(
+UInstancedStaticMeshComponent* ABattleSpawnerActor::CreateHISM(
 	FName Name, UStaticMesh* Mesh, UMaterialInterface* Material)
 {
-	auto* HISM = NewObject<UHierarchicalInstancedStaticMeshComponent>(this, Name);
+	auto* HISM = NewObject<UInstancedStaticMeshComponent>(this, Name);
 	HISM->SetupAttachment(RootComponent);
 	HISM->SetAbsolute(true, true, true);   // world-space instances
 	HISM->SetCastShadow(true);
@@ -1812,20 +1836,15 @@ void ABattleSpawnerActor::UpdateVisualization()
 
 	const FMassEntityManager& EM = Subsystem->GetEntityManager();
 
-	// ── Helper: build instance transform from entity ──────────────────────
-	// UE5 cylinder: radius=50, height=100 centered at origin
-	// Human scale:  ~170cm tall, ~30cm wide
-	// Alive:  scale (0.3, 0.3, 1.7), offset Z +85 (base at feet)
-	// Dead:   roll 90°, near ground
-	constexpr float AliveScaleXY = 0.3f;
-	constexpr float AliveScaleZ  = 1.7f;
-	constexpr float AliveZOff    = 85.f;    // half of 170
-
 	// ── Soldiers (corporals routed to CorporalHISM — visual marker only) ────
 	// PERF: gather transforms into arrays, then push each HISM in ONE batched
-	// AddInstances call. The old per-instance ClearInstances+AddInstance rebuilt
+	// AddInstances call. A per-instance ClearInstances+AddInstance rebuilds
 	// the HISM cluster tree on EVERY call (2000×/frame) — a game-thread killer.
 	// AddInstances builds the tree once per HISM instead.
+	//
+	// Scale: SoldierMesh (Soldier_20K) is a real human-proportioned model
+	// imported at 1:1 cm scale with feet at the local origin — unlike the old
+	// engine-cylinder placeholder, it needs NO artificial XY squash / Z lift.
 	if (SoldierHISM && DeadSoldierHISM)
 	{
 		const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
@@ -1845,19 +1864,15 @@ void ABattleSpawnerActor::UpdateVisualization()
 
 			if (SF.State == EAgentState::DEAD)
 			{
-				// Fallen: rotate 90° roll, near ground
+				// Fallen: rotate 90° pitch to lie down, flat on the ground.
 				FVector Pos = TF.GetTransform().GetLocation();
-				Pos.Z = 15.f;
 				const float Yaw = TF.GetTransform().Rotator().Yaw;
-				DeadT.Emplace(FRotator(0.f, Yaw, 90.f).Quaternion(), Pos,
-					FVector(AliveScaleXY, AliveScaleXY, AliveScaleZ));
+				DeadT.Emplace(FRotator(0.f, Yaw, 90.f).Quaternion(), Pos, FVector(1.f, 1.f, 1.f));
 			}
 			else
 			{
-				FVector Pos = TF.GetTransform().GetLocation();
-				Pos.Z += AliveZOff;
-				const FTransform T(TF.GetTransform().GetRotation(), Pos,
-					FVector(AliveScaleXY, AliveScaleXY, AliveScaleZ));
+				const FTransform T(TF.GetTransform().GetRotation(), TF.GetTransform().GetLocation(),
+					FVector(1.f, 1.f, 1.f));
 
 				const bool bCorporal = CorporalHISM
 					&& CorporalFlags.IsValidIndex(i) && CorporalFlags[i];
@@ -1870,17 +1885,16 @@ void ABattleSpawnerActor::UpdateVisualization()
 		DeadSoldierHISM->ClearInstances();
 		if (CorporalHISM) CorporalHISM->ClearInstances();
 
-		// NOTE: AddInstances(..., bWorldSpace=true) silently failed to place the
-		// instances here (HISM uses SetAbsolute) — the men were alive but unseen.
-		// The transforms are already absolute world transforms and the component
-		// sits at the origin, so add them in LOCAL space (bWorldSpace=false),
-		// which AddInstances handles reliably. Still one batched call per HISM.
+		// NOTE: instances are already absolute world transforms and the HISM
+		// component sits at the origin (SetAbsolute), so add them in LOCAL
+		// space (bWorldSpace=false) — bWorldSpace=true silently failed to
+		// place them here. Still one batched call per HISM.
 		if (AliveT.Num() > 0) SoldierHISM->AddInstances(AliveT, /*bShouldReturnIndices=*/false, /*bWorldSpace=*/false);
 		if (DeadT.Num()  > 0) DeadSoldierHISM->AddInstances(DeadT, false, false);
 		if (CorporalHISM && CorpT.Num() > 0) CorporalHISM->AddInstances(CorpT, false, false);
 	}
 
-	// ── Officer ───────────────────────────────────────────────────────────
+	// ── Officer (HISM) ────────────────────────────────────────────────────
 	if (OfficerHISM && OfficerEntity.IsValid() && EM.IsEntityValid(OfficerEntity))
 	{
 		OfficerHISM->ClearInstances();
@@ -1890,25 +1904,15 @@ void ABattleSpawnerActor::UpdateVisualization()
 
 		if (OF.bIsAlive)
 		{
-			// Officer: taller, wider
-			FVector Pos = TF.GetTransform().GetLocation();
-			Pos.Z += 95.f;
-			FTransform OT(TF.GetTransform().GetRotation(), Pos,
-				FVector(0.4f, 0.4f, 1.9f));
+			FTransform OT(TF.GetTransform().GetRotation(), TF.GetTransform().GetLocation(),
+				FVector(1.f, 1.f, 1.f));
 			OfficerHISM->AddInstance(OT, true);
 		}
 	}
 
-	// ── NCOs ──────────────────────────────────────────────────────────────
+	// ── NCOs (HISM) ───────────────────────────────────────────────────────
 	if (NCOHISM)
 	{
-		// NCO: slightly taller and wider than officer (~210 cm tall).
-		// Z offset must match half-height (scale.Z * 100 / 2) so the capsule
-		// stands ON the ground, not buried under it.
-		constexpr float NCOScaleXY = 0.45f;
-		constexpr float NCOScaleZ  = 2.1f;
-		constexpr float NCOZOff    = 105.f;   // half of 210
-
 		TArray<FTransform> NCOTs;
 		NCOTs.Reserve(NCOEntities.Num());
 		for (const FMassEntityHandle& NCOHandle : NCOEntities)
@@ -1919,24 +1923,17 @@ void ABattleSpawnerActor::UpdateVisualization()
 			const FNCOFragment& NCO      = EM.GetFragmentDataChecked<FNCOFragment>(NCOHandle);
 			if (!NCO.bIsAlive) continue;
 
-			FVector Pos = TF.GetTransform().GetLocation();
-			Pos.Z += NCOZOff;
-			NCOTs.Emplace(TF.GetTransform().GetRotation(), Pos,
-				FVector(NCOScaleXY, NCOScaleXY, NCOScaleZ));
+			NCOTs.Emplace(TF.GetTransform().GetRotation(), TF.GetTransform().GetLocation(),
+				FVector(1.f, 1.f, 1.f));
 		}
 
 		NCOHISM->ClearInstances();
 		if (NCOTs.Num() > 0) NCOHISM->AddInstances(NCOTs, false, true);
 	}
 
-	// ── Drummers ──────────────────────────────────────────────────────────
+	// ── Drummers (HISM) ───────────────────────────────────────────────────
 	if (DrummerHISM)
 	{
-		// Drummer: a touch shorter than a private (~175 cm), distinct material.
-		constexpr float DrumScaleXY = 0.32f;
-		constexpr float DrumScaleZ  = 1.75f;
-		constexpr float DrumZOff    = 87.5f;   // half of 175
-
 		TArray<FTransform> DrumTs;
 		DrumTs.Reserve(DrummerEntities.Num());
 		for (const FMassEntityHandle& DrummerHandle : DrummerEntities)
@@ -1947,10 +1944,8 @@ void ABattleSpawnerActor::UpdateVisualization()
 			const FDrummerFragment& DR   = EM.GetFragmentDataChecked<FDrummerFragment>(DrummerHandle);
 			if (!DR.bIsAlive) continue;
 
-			FVector Pos = TF.GetTransform().GetLocation();
-			Pos.Z += DrumZOff;
-			DrumTs.Emplace(TF.GetTransform().GetRotation(), Pos,
-				FVector(DrumScaleXY, DrumScaleXY, DrumScaleZ));
+			DrumTs.Emplace(TF.GetTransform().GetRotation(), TF.GetTransform().GetLocation(),
+				FVector(1.f, 1.f, 1.f));
 		}
 
 		DrummerHISM->ClearInstances();

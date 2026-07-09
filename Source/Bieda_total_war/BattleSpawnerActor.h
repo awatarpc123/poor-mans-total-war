@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
-#include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "MassEntityHandle.h"
 #include "MassEntityManager.h"
 #include "BattleTypes.h"
@@ -146,6 +146,21 @@ public:
 	 *  losses (≈30% strength remaining) → slow attrition panic. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0"))
 	float AttritionCeilingPenalty = 180.f;
+
+	/** Extended-casualty drain (morale/s per accumulated point): a THIRD,
+	 *  independent casualty-tracking timeframe alongside ShockPerDeath (fast,
+	 *  local, per-death) and AttritionCeilingPenalty (permanent, total-losses).
+	 *  Sustained losses over ~10-60s build a persistent squad-wide drain that
+	 *  neither of the other two captures — "we've been bleeding a while and
+	 *  it's wearing us down", distinct from a sudden salvo or the final tally.
+	 *  Mirrors ETW's separate recent/extended/total casualty penalty tables. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0"))
+	float ExtendedCasualtyDrainRate = 0.4f;
+
+	/** How fast the extended-casualty accumulator fades (points/s, linear).
+	 *  Lower = sustained losses "linger" longer before the drain fades. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Morale", meta = (ClampMin = "0.01"))
+	float ExtendedCasualtyDecayRate = 0.15f;
 
 	/** 0 = player, 1 = enemy, etc. Assigned to every entity via FFactionFragment. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Faction")
@@ -302,6 +317,7 @@ private:
 	TArray<FShockSource> ShockSources;     // active death-shock emitters
 	TArray<bool>         SoldierWasAlive;   // per-soldier alive state last frame
 	int32                InitialSoldierCount = 0;  // for the attrition ceiling
+	float                ExtendedCasualtyAccum = 0.f;  // sustained-loss accumulator (see ExtendedCasualtyDrainRate)
 	void UpdateCasualtyShock(float DeltaSeconds);
 
 	// ── Engagement ──────────────────────────────────────────────────────────
@@ -323,30 +339,36 @@ private:
 	// the movement processor can apply CatchUpSpeed for them.
 	void UpdateStragglers();
 
-	// ── Visualization ───────────────────────────────────────────────────────
+	// ── Visualization (ISM, batched per-frame instancing) ───────────────────
+	// Plain ISM, NOT hierarchical: HISM builds its cluster tree ASYNC after
+	// AddInstances, and our per-frame ClearInstances+AddInstances kept
+	// cancelling that build — bounds stayed empty (radius 0) and the renderer
+	// culled the whole component, so the army was invisible. ISM computes
+	// bounds synchronously from the instance list and has no tree to build;
+	// hierarchical culling buys nothing for a fully-rebuilt-every-frame set.
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> SoldierHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> SoldierHISM;
 
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DeadSoldierHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> DeadSoldierHISM;
 
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> OfficerHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> CorporalHISM;
 
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> NCOHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> OfficerHISM;
 
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> DrummerHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> NCOHISM;
 
 	UPROPERTY()
-	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> CorporalHISM;
+	TObjectPtr<UInstancedStaticMeshComponent> DrummerHISM;
 
 	void SetupVisualization();
 	void UpdateVisualization();
 
 	UStaticMesh* GetFallbackMesh() const;
-	UHierarchicalInstancedStaticMeshComponent* CreateHISM(
+	UInstancedStaticMeshComponent* CreateHISM(
 		FName Name, UStaticMesh* Mesh, UMaterialInterface* Material);
 
 	/** Draw fire-range arc and facing arrow (called from UpdateVisualization). */
