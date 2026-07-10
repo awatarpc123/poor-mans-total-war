@@ -208,6 +208,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
 	TObjectPtr<UMaterialInterface> CorporalMaterial = nullptr;
 
+	/** Hybrid rendering: this squad's soldiers render as real animated
+	 *  Characters (ABattleSoldierCharacter) instead of the static ISM
+	 *  whenever it's the selected squad OR the camera is within this
+	 *  distance (cm) of its formation center. Everyone else stays on the
+	 *  cheap ISM path. 0 = never animate (pure ISM, old behaviour). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals", meta = (ClampMin = "0"))
+	float AnimatedActorRange = 6000.f;
+
 	/**
 	 * Issue a move order with optional formation change.
 	 * Clears any active engagement.
@@ -279,6 +287,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	TArray<FMassEntityHandle> SpawnedEntities;   // soldiers only
@@ -370,6 +379,15 @@ private:
 	UStaticMesh* GetFallbackMesh() const;
 	UInstancedStaticMeshComponent* CreateHISM(
 		FName Name, UStaticMesh* Mesh, UMaterialInterface* Material);
+
+	// ── Hybrid animated-actor rendering (see AnimatedActorRange) ────────────
+	UPROPERTY()
+	TArray<TObjectPtr<class ABattleSoldierCharacter>> AnimatedActors;
+
+	bool ShouldUseAnimatedActors() const;
+	void EnsureAnimatedActorsSpawned();
+	void DestroyAnimatedActors();
+	void SyncAnimatedActors(const FMassEntityManager& EM);
 
 	/** Draw fire-range arc and facing arrow (called from UpdateVisualization). */
 	void DrawFireRangeArc(const FMassEntityManager& EM);

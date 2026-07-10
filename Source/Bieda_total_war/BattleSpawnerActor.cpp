@@ -7,6 +7,9 @@
 #include "BattleSimControl.h"       // BattleSimPaused()
 #include "BattleStats.h"
 #include "DrawDebugHelpers.h"
+#include "BattleSoldierCharacter.h"
+#include "BattleCameraPawn.h"
+#include "GameFramework/PlayerController.h"
 
 DECLARE_CYCLE_STAT(TEXT("Spawner: Visualization"), STAT_BiedaVis,    STATGROUP_Bieda);
 DECLARE_CYCLE_STAT(TEXT("Spawner: Engagement"),    STAT_BiedaEngage, STATGROUP_Bieda);
@@ -40,6 +43,81 @@ void ABattleSpawnerActor::BeginPlay()
 	Super::BeginPlay();
 	SetupVisualization();
 	SpawnAgents();
+}
+
+void ABattleSpawnerActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	DestroyAnimatedActors();
+	Super::EndPlay(EndPlayReason);
+}
+
+bool ABattleSpawnerActor::ShouldUseAnimatedActors() const
+{
+	if (AnimatedActorRange <= 0.f) return false;
+
+	UWorld* World = GetWorld();
+	if (!World) return false;
+
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC) return false;
+
+	ABattleCameraPawn* Cam = Cast<ABattleCameraPawn>(PC->GetPawn());
+	if (!Cam) return false;
+
+	if (Cam->GetSelectedSpawner() == this) return true;
+
+	const float DistSq = FVector::DistSquared(Cam->GetActorLocation(), GetFormationCenter());
+	return DistSq < FMath::Square(AnimatedActorRange);
+}
+
+void ABattleSpawnerActor::EnsureAnimatedActorsSpawned()
+{
+	if (AnimatedActors.Num() > 0) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	Params.Owner = this;
+
+	AnimatedActors.Reserve(NumAgents);
+	for (int32 i = 0; i < NumAgents; ++i)
+	{
+		if (ABattleSoldierCharacter* Actor = World->SpawnActor<ABattleSoldierCharacter>(Params))
+			AnimatedActors.Add(Actor);
+	}
+}
+
+void ABattleSpawnerActor::DestroyAnimatedActors()
+{
+	for (ABattleSoldierCharacter* Actor : AnimatedActors)
+		if (Actor && IsValid(Actor)) Actor->Destroy();
+	AnimatedActors.Empty();
+}
+
+void ABattleSpawnerActor::SyncAnimatedActors(const FMassEntityManager& EM)
+{
+	const int32 Count = FMath::Min(AnimatedActors.Num(), SpawnedEntities.Num());
+	for (int32 i = 0; i < Count; ++i)
+	{
+		ABattleSoldierCharacter* Actor = AnimatedActors[i];
+		if (!Actor) continue;
+
+		const FMassEntityHandle Entity = SpawnedEntities[i];
+		if (!EM.IsEntityValid(Entity))
+		{
+			Actor->SetActorHiddenInGame(true);
+			continue;
+		}
+
+		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
+
+		Actor->SetActorHiddenInGame(false);
+		Actor->SetActorLocationAndRotation(TF.GetTransform().GetLocation(), TF.GetTransform().GetRotation());
+		Actor->SetSoldierState(SF.State);
+	}
 }
 
 void ABattleSpawnerActor::Tick(float DeltaSeconds)
@@ -1845,8 +1923,21 @@ void ABattleSpawnerActor::UpdateVisualization()
 	// Scale: SoldierMesh (Soldier_20K) is a real human-proportioned model
 	// imported at 1:1 cm scale with feet at the local origin — unlike the old
 	// engine-cylinder placeholder, it needs NO artificial XY squash / Z lift.
-	if (SoldierHISM && DeadSoldierHISM)
+	// Hybrid switch: selected/near squads render via animated Characters
+	// instead of the ISM. See AnimatedActorRange / ShouldUseAnimatedActors.
+	if (ShouldUseAnimatedActors())
 	{
+		EnsureAnimatedActorsSpawned();
+		SyncAnimatedActors(EM);
+
+		if (SoldierHISM)      SoldierHISM->ClearInstances();
+		if (DeadSoldierHISM)  DeadSoldierHISM->ClearInstances();
+		if (CorporalHISM)     CorporalHISM->ClearInstances();
+	}
+	else if (SoldierHISM && DeadSoldierHISM)
+	{
+		if (AnimatedActors.Num() > 0) DestroyAnimatedActors();
+
 		const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
 
 		TArray<FTransform> AliveT, DeadT, CorpT;
