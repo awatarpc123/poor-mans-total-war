@@ -3,7 +3,6 @@
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "UObject/ConstructorHelpers.h"
-#include "Animation/AnimSingleNodeInstance.h"
 
 ABattleSoldierCharacter::ABattleSoldierCharacter()
 {
@@ -18,6 +17,13 @@ ABattleSoldierCharacter::ABattleSoldierCharacter()
 
 	USkeletalMeshComponent* MeshComp = GetMesh();
 	MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Mesh pivot is already at the feet (verified: lowest vertex ~5cm above
+	// origin, same convention as the ISM Soldier_Retopo mesh) — no Z lift needed.
+	// Mesh's authored forward axis is rotated 90° relative to the capsule's
+	// forward; the ISM path (raw FBX import, no Blender re-export) needs zero
+	// correction and faces correctly, so this offset compensates for the
+	// Blender FBX round-trip used for the animated variant.
+	MeshComp->SetRelativeRotation(FRotator(0.0f, -90.0f, 0.0f));
 	MeshComp->SetAnimationMode(EAnimationMode::AnimationSingleNode);
 	MeshComp->SetCastShadow(true);
 	// Force the pose to advance every frame regardless of on-screen size /
@@ -113,34 +119,5 @@ void ABattleSoldierCharacter::SetSoldierState(EAgentState NewState)
 	{
 		if (UAnimSequence* Seq = GetSequenceForState(CurrentState))
 			MeshComp->PlayAnimation(Seq, /*bLooping=*/ true);
-
-		// TEMP DIAGNOSTIC — REMOVE ME: a re-assert firing repeatedly means
-		// playback never sticks (restart loop => frozen on frame 0).
-		static double GNextReassertLog = 0.0;
-		const double Now = FPlatformTime::Seconds();
-		if (Now > GNextReassertLog)
-		{
-			GNextReassertLog = Now + 1.0;
-			UE_LOG(LogTemp, Warning, TEXT("[BiedaAnimDiag] RE-ASSERT fired on %s (state=%d) — playback not sticking?"),
-				*GetName(), (int32)CurrentState);
-		}
-	}
-
-	// TEMP DIAGNOSTIC — REMOVE ME: once a second dump playback position of one
-	// actor; if Pos never advances, the anim instance isn't ticking.
-	static double GNextPosLog = 0.0;
-	const double Now2 = FPlatformTime::Seconds();
-	if (Now2 > GNextPosLog)
-	{
-		GNextPosLog = Now2 + 1.0;
-		UAnimSingleNodeInstance* Inst = MeshComp->GetSingleNodeInstance();
-		UE_LOG(LogTemp, Warning, TEXT("[BiedaAnimDiag] %s state=%d playing=%d pos=%.3f len=%.3f mode=%d compTick=%d visOpt=%d"),
-			*GetName(), (int32)CurrentState,
-			MeshComp->IsPlaying() ? 1 : 0,
-			Inst ? Inst->GetCurrentTime() : -1.f,
-			Inst && Inst->GetAnimationAsset() ? Inst->GetLength() : -1.f,
-			(int32)MeshComp->GetAnimationMode(),
-			MeshComp->IsComponentTickEnabled() ? 1 : 0,
-			(int32)MeshComp->VisibilityBasedAnimTickOption);
 	}
 }
