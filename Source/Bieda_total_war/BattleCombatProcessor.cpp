@@ -62,7 +62,6 @@ namespace
 	constexpr int32 HNtoXH_2 =  6;
 	constexpr int32 HNtoXH_3 = 12;
 	constexpr float KB[] = { 70.f, 90.f, 110.f, 150.f, 200.f };
-	constexpr float KD[] = { 30.f, 50.f,  60.f,  80.f, 100.f };
 	constexpr float DmgMult[] = { 0.5f, 0.8f, 1.0f, 1.3f, 1.7f };
 	constexpr float BlockRange     = 1200.f;
 	constexpr float BlockRangeSq   = BlockRange * BlockRange;
@@ -394,9 +393,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 						else if (Dot > FrontHitDotThresh) DirB = DirBonusFlank;
 
 						const int32 XH = XHoldsFromHN(AtkVal+DirB, DefVal);
-						CF.LastXHolds     = XH;
 						CF.LastKnockback  = KB[FMath::Clamp(XH,0,4)];
-						CF.bLastKnockdown = FMath::FRand()*100.f < KD[FMath::Clamp(XH,0,4)];
 
 						float Dmg = CalcDamage(BaseMeleeDamage*DmgMult[FMath::Clamp(XH,0,4)],
 							ArmorVals[NearEn], DefenseVals[NearEn], 2.f, 2.f);

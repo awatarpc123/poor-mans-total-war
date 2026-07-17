@@ -13,8 +13,8 @@
 // builds and perf tests run clean; flip to 1 when you want the diagnostic view.
 static TAutoConsoleVariable<int32> CVarBiedaDebug(
 	TEXT("bieda.Debug"),
-	1,   // default ON so the debug shapes show without typing it each run;
-	     // set `bieda.Debug 0` for a perf pass (debug draw is costly at 1000+).
+	0,   // default OFF so builds and perf tests run clean;
+	     // set `bieda.Debug 1` for the diagnostic view (costly at 1000+ agents).
 	TEXT("Draw Bieda battle debug shapes (0=off, 1=on). Costs a lot at 1000+ agents."),
 	ECVF_Default);
 
@@ -84,6 +84,18 @@ static FColor AgentColor(EAgentState State)
 	}
 }
 
+// Vertical line above the agent, length = morale (0-100cm), color-thresholded
+// green>60 / yellow>30 / red otherwise. Shared by officers, NCOs and soldiers.
+static void DrawMoraleBar(UWorld* World, const FVector& Pos, float BaseHeight, float Morale, float Thickness)
+{
+	const FVector BarBase = Pos + FVector(0.f, 0.f, BaseHeight);
+	const FVector BarTop  = BarBase + FVector(0.f, 0.f, Morale);
+	const FColor  BarCol  = (Morale > 60.f) ? FColor::Green
+	                      : (Morale > 30.f) ? FColor::Yellow
+	                                        : FColor::Red;
+	DrawDebugLine(World, BarBase, BarTop, BarCol, false, -1.f, 0, Thickness);
+}
+
 void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExecutionContext& Context)
 {
 	// Skip the whole pass when debug drawing is off — no per-agent work at all.
@@ -139,12 +151,7 @@ void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			// Morale bar (same as soldiers but taller)
 			if (bAlive)
 			{
-				const FVector BarBase = Pos + FVector(0.f, 0.f, 180.f);
-				const FVector BarTop  = BarBase + FVector(0.f, 0.f, Morale);
-				const FColor  BarCol  = (Morale > 60.f) ? FColor::Green
-				                      : (Morale > 30.f) ? FColor::Yellow
-				                                        : FColor::Red;
-				DrawDebugLine(World, BarBase, BarTop, BarCol, false, -1.f, 0, 3.f);
+				DrawMoraleBar(World, Pos, 180.f, Morale, 3.f);
 			}
 
 			// Enemy indicator: red ring on the ground
@@ -182,12 +189,7 @@ void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			// Morale bar
 			if (bAlive)
 			{
-				const FVector BarBase = Pos + FVector(0.f, 0.f, 170.f);
-				const FVector BarTop  = BarBase + FVector(0.f, 0.f, Morale);
-				const FColor  BarCol  = (Morale > 60.f) ? FColor::Green
-				                      : (Morale > 30.f) ? FColor::Yellow
-				                                        : FColor::Red;
-				DrawDebugLine(World, BarBase, BarTop, BarCol, false, -1.f, 0, 2.5f);
+				DrawMoraleBar(World, Pos, 170.f, Morale, 2.5f);
 			}
 
 			// Line to target soldier (when chasing)
@@ -248,16 +250,10 @@ void UBattleDebugProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			DrawDebugCapsule(World, Pos + Up, 50.f, 25.f, FQuat::Identity,
 				Color, false, -1.f, 0, 2.f);
 
-			// Morale bar: vertical line above capsule, length = morale (0–100cm)
-			// Color: green > 60, yellow 30–60, red < 30
+			// Morale bar: vertical line above capsule, length = morale (0-100cm)
 			if (States[i].State != EAgentState::DEAD)
 			{
-				const FVector BarBase = Pos + FVector(0.f, 0.f, 140.f);
-				const FVector BarTop  = BarBase + FVector(0.f, 0.f, Morale);
-				const FColor BarColor = (Morale > 60.f) ? FColor::Green
-				                      : (Morale > 30.f) ? FColor::Yellow
-				                                        : FColor::Red;
-				DrawDebugLine(World, BarBase, BarTop, BarColor, false, -1.f, 0, 2.f);
+				DrawMoraleBar(World, Pos, 140.f, Morale, 2.f);
 			}
 
 			// Velocity arrow

@@ -68,10 +68,6 @@ struct BIEDA_TOTAL_WAR_API FMoraleFragment : public FMassFragment
 {
 	GENERATED_BODY()
 	float Morale = 80.f;
-	/** Fatigue-level penalty cached by MoraleProcessor each frame.
-	 *  ETW: ume_concerned_tired=-1, ume_concerned_exhausted=-4
-	 *  Computed from EFatigueLevel, applies as additive drain per second. */
-	float FatigueMoralePenalty = 0.f;
 };
 
 USTRUCT()
@@ -190,9 +186,7 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	float MeleeChargeBonus  = 4.f;     // added to attack when charging (bForceRun + bInMeleeContact)
 
 	// HN result cached by CombatProcessor for knockback evaluation
-	int32  LastXHolds       = 0;       // 0-4, from last melee hit
 	float  LastKnockback    = 0.f;     // cm to push target
-	bool   bLastKnockdown   = false;   // target should play knockdown anim
 };
 
 // ── Order propagation ────────────────────────────────────────────────────────
