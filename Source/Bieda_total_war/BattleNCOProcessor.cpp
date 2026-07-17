@@ -134,9 +134,10 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 						bStillValid = true;
 						break;
 					}
-					// Routing/shaken: still needs steadying
+					// Routing/shaken/wavering: still needs steadying
 					if (S.State == EAgentState::ROUTING ||
-						S.State == EAgentState::SHAKEN)
+						S.State == EAgentState::SHAKEN ||
+						S.State == EAgentState::WAVERING)
 					{
 						bStillValid = true;
 						break;
@@ -156,15 +157,16 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				float BestDistSq = FLT_MAX;
 				int32 BestIdx    = INDEX_NONE;
 
-				// Priority 1: wavering (SHAKEN) or routing soldiers — steady/rally.
-				// SHAKEN included so NCOs run up BEFORE the man fully breaks.
+				// Priority 1: wavering (SHAKEN/WAVERING) or routing soldiers — steady/rally.
+				// SHAKEN/WAVERING included so NCOs run up BEFORE the man fully breaks.
 				// Skip soldiers another NCO is already chasing (ClaimedTargets).
 				for (int32 s = 0; s < Soldiers.Num(); ++s)
 				{
 					const FNCOSoldierSnap& S = Soldiers[s];
 					if (S.SquadId != MySquad) continue;
 					if (S.State != EAgentState::ROUTING &&
-						S.State != EAgentState::SHAKEN) continue;
+						S.State != EAgentState::SHAKEN &&
+						S.State != EAgentState::WAVERING) continue;
 					if (ClaimedTargets.Contains(S.Handle)) continue;
 
 					const float DistSq = (S.Position - NCOPos).SizeSquared2D();
@@ -270,7 +272,8 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				if (DistToTarget < 200.f)
 				{
 					if (TargetState == EAgentState::ROUTING ||
-						TargetState == EAgentState::SHAKEN)
+						TargetState == EAgentState::SHAKEN ||
+						TargetState == EAgentState::WAVERING)
 					{
 						// Rally: boost morale of routing/shaken soldier (continuous).
 						// NCO at his side steadies him faster than passive recovery.
@@ -310,7 +313,8 @@ void UBattleNCOProcessor::Execute(FMassEntityManager& EntityManager, FMassExecut
 				{
 					if (S.SquadId != MySquad) continue;
 					if (S.State != EAgentState::ROUTING &&
-						S.State != EAgentState::SHAKEN) continue;
+						S.State != EAgentState::SHAKEN &&
+						S.State != EAgentState::WAVERING) continue;
 
 					const float DistSq = (S.Position - NCOPos).SizeSquared2D();
 					if (DistSq < FMath::Square(NCO.RallyRadius))

@@ -26,3 +26,9 @@ BIEDA_TOTAL_WAR_API void  ToggleBattleSimPaused();
 // Backed by the `bieda.TimeScale` console variable.
 BIEDA_TOTAL_WAR_API float BattleSimTimeScale();
 BIEDA_TOTAL_WAR_API void  StepBattleSimTimeScale(int32 Dir);
+
+// ── Debug-visualisation toggle ────────────────────────────────────────────────
+// When enabled, every ABattleSpawnerActor swaps its detailed soldier meshes for
+// a basic cylinder so you can profile simulation cost vs. rendering cost.
+// Console:  bieda.DebugCapsules 1   (triggers immediate visual rebuild)
+BIEDA_TOTAL_WAR_API bool  BattleDebugCapsulesEnabled();

@@ -22,7 +22,20 @@ enum class EVolleyMode : uint8
 	RankFire     UMETA(DisplayName = "Rank Fire"),
 };
 
-// ── Agent state ─────────────────────────────────────────────────────────────
+// ── Fatigue level (ETW: 6 levels, scale 0-28800) ────────────────────────────
+
+UENUM(BlueprintType)
+enum class EFatigueLevel : uint8
+{
+	Fresh     UMETA(DisplayName = "Fresh"),
+	Active    UMETA(DisplayName = "Active"),
+	Winded    UMETA(DisplayName = "Winded"),
+	Tired     UMETA(DisplayName = "Tired"),
+	VeryTired UMETA(DisplayName = "Very Tired"),
+	Exhausted UMETA(DisplayName = "Exhausted"),
+};
+
+// ── Agent state (ETW-style extended) ────────────────────────────────────────
 
 UENUM(BlueprintType)
 enum class EAgentState : uint8
@@ -36,6 +49,8 @@ enum class EAgentState : uint8
 	ROUTING   UMETA(DisplayName = "Routing"),
 	RALLYING  UMETA(DisplayName = "Rallying"),
 	SHAKEN    UMETA(DisplayName = "Shaken"),
+	WAVERING  UMETA(DisplayName = "Wavering"),
+	STEADY    UMETA(DisplayName = "Steady"),
 	PINNED    UMETA(DisplayName = "Pinned"),
 	DEAD      UMETA(DisplayName = "Dead"),
 };
@@ -53,6 +68,10 @@ struct BIEDA_TOTAL_WAR_API FMoraleFragment : public FMassFragment
 {
 	GENERATED_BODY()
 	float Morale = 80.f;
+	/** Fatigue-level penalty cached by MoraleProcessor each frame.
+	 *  ETW: ume_concerned_tired=-1, ume_concerned_exhausted=-4
+	 *  Computed from EFatigueLevel, applies as additive drain per second. */
+	float FatigueMoralePenalty = 0.f;
 };
 
 USTRUCT()
@@ -96,9 +115,10 @@ struct BIEDA_TOTAL_WAR_API FAgentVelocityFragment : public FMassFragment
 	FVector PersonalFinalOffset    = FVector::ZeroVector;
 
 	// ── Formation slot info (set by spawner) ────────────────────────────────
-	int32 FormationRow  = 0;       // row index (0 = front)
-	int32 FormationCol  = 0;       // column index in row
-	float CurveOffset   = 0.f;    // organic per-entity offset perpendicular to front line (cm)
+	int32  FormationRow = 0;       // rank (0 = front)
+	int32  FormationCol = 0;       // file (0 = leftmost)
+	uint16 SlotIndex    = 0;       // index into pre-computed formation slot array (spawner-owned)
+	float   CurveOffset = 0.f;    // organic per-entity offset perpendicular to front line (cm)
 
 	// ── Routing flee direction (latched once on entering ROUTING) ────────────
 	// Captured at the moment of panic so it stays stable (fidget can't corrupt
@@ -116,13 +136,15 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	float AimDuration        = 2.f;
 	float FireDuration       = 0.5f;
 
-	// ── Morale modifiers ────────────────────────────────────────────────────
-	float MoraleDrainFire    = 15.f;
-	float MoraleDrainLoading = 0.5f;
-	float RouteRecoveryRate  = 1.2f;   // morale/s regained while ROUTING (lower = panic lasts longer)
-	float PanicThreshold     = 20.f;   // morale < this → ROUTING (full panic, run)
-	float ShakenThreshold    = 40.f;   // PanicThreshold ≤ morale < this → SHAKEN (wavering, hold fire)
-	float ShakenRecover      = 50.f;   // morale ≥ this → SHAKEN steadies back to HOLDING (hysteresis)
+	// ── Morale modifiers (ETW multi-tier) ───────────────────────────────────
+	float MoraleDrainFire     = 15.f;
+	float MoraleDrainLoading  = 0.5f;
+	float RouteRecoveryRate   = 1.2f;
+	float PanicThreshold      = 20.f;   // < this → ROUTING
+	float ShakenThreshold     = 25.f;   // < this → SHAKEN (heavy, holds fire)
+	float WaverThreshold      = 40.f;   // < this → WAVERING (reduced fire; hysteresis: recovers to HOLDING at +10)
+	float ShakenRecover       = 35.f;   // SHAKEN→WAVERING at this (hysteresis)
+	float WaverRecover        = 50.f;   // WAVERING→HOLDING at this
 
 	// ── Health ──────────────────────────────────────────────────────────────
 	float HP = 100.f;
@@ -157,12 +179,20 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	// away). Cleared after the first shot; every later cycle reloads normally.
 	bool bMusketLoaded       = true;
 
-	// ── Melee contact ────────────────────────────────────────────────────────
+	// ── Melee (HN system — ETW HitNumber → XHolds → knockback/knockdown) ─────
 	bool  bInMeleeContact   = false;   // set by CombatProcessor: enemy within MeleeRange
 	bool  bPrevMeleeContact = false;   // last frame's value — for first-contact charge shock
 	float MeleeTimer        = 0.f;     // time since last melee hit
-	float MeleeDamage       = 40.f;    // HP dealt per melee hit (~3 hits to kill)
-	float MeleeAttackRate   = 0.8f;    // seconds between melee hits
+
+	// ETW unit_stats_land values (copied from spawner)
+	float MeleeAttack       = 8.f;     // attack skill (vs defense for HN calc)
+	float MeleeDefense      = 8.f;     // defense skill
+	float MeleeChargeBonus  = 4.f;     // added to attack when charging (bForceRun + bInMeleeContact)
+
+	// HN result cached by CombatProcessor for knockback evaluation
+	int32  LastXHolds       = 0;       // 0-4, from last melee hit
+	float  LastKnockback    = 0.f;     // cm to push target
+	bool   bLastKnockdown   = false;   // target should play knockdown anim
 };
 
 // ── Order propagation ────────────────────────────────────────────────────────
@@ -187,7 +217,7 @@ struct BIEDA_TOTAL_WAR_API FOfficerFragment : public FMassFragment
 	GENERATED_BODY()
 
 	float MoraleRadius   = 500.f;   // aura radius (cm) — morale bonus to nearby soldiers
-	float MoraleBonus    = 1.f;     // morale/s granted to soldiers within MoraleRadius
+	float MoraleBonus    = 4.f;     // morale/s granted to soldiers within MoraleRadius (ETW: inspired=+6)
 	float MoveSpeed      = 200.f;   // cm/s — keeps the formation pace (synced by spawner)
 	float MoraleDrainCap = 10.f;    // max morale/s drained from nearby routing soldiers
 
@@ -243,15 +273,24 @@ struct BIEDA_TOTAL_WAR_API FDrummerFragment : public FMassFragment
 	bool    bHasFormationPos = false;
 };
 
-// ── Fatigue ─────────────────────────────────────────────────────────────────
+// ── Fatigue (ETW scale: 0–28800 points, 6 levels) ───────────────────────────
 
 USTRUCT()
 struct BIEDA_TOTAL_WAR_API FFatigueFragment : public FMassFragment
 {
 	GENERATED_BODY()
-	// Grows while running (bForceRun / bIsStraggler), decays at rest.
-	// Range 0-100. Penalises speed (max -30%) and accuracy (max -50%).
-	float Fatigue = 0.f;
+	/** Fatigue points: 0 = fresh, 28800 = exhausted (ETW scale).
+	 *  Accumulates per-activity (running=8/s, combat=10/s, etc.)
+	 *  Decays on idle (-8/s). */
+	int32 FatiguePoints = 0;
+
+	/** Current discrete level (Fresh/Active/Winded/...). Updated each frame
+	 *  from FatiguePoints threshold lookup — avoids branching in queries. */
+	EFatigueLevel Level = EFatigueLevel::Fresh;
+
+	/** Per-unit resistance bonus (from unit_stats_land). -1 = tire slower,
+	 *  +1 = tire faster. ETW: fatigue_resistant_delta compensates unit stat. */
+	int8 Resistance = 0;
 };
 
 // ── Faction ─────────────────────────────────────────────────────────────────

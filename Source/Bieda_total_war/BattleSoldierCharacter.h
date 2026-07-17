@@ -50,6 +50,9 @@ private:
 	UPROPERTY()
 	TObjectPtr<UAnimSequence> ShootStandingAnim;
 
+	UPROPERTY()
+	TObjectPtr<UAnimSequence> ReloadAnim;
+
 	// Loaded but unused for now — reserved for a future kneeling front-rank
 	// visual mode (2-line formations), not yet a distinct EAgentState.
 	UPROPERTY()

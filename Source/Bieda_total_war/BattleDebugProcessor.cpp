@@ -75,7 +75,9 @@ static FColor AgentColor(EAgentState State)
 	case EAgentState::MELEE:     return FColor::Magenta;
 	case EAgentState::ROUTING:   return FColor::Red;
 	case EAgentState::RALLYING:  return FColor(128,   0, 128);  // Purple
-	case EAgentState::SHAKEN:    return FColor(255,  60,   0);  // Red-orange (wavering)
+	case EAgentState::SHAKEN:    return FColor(255,  60,   0);  // Red-orange
+	case EAgentState::WAVERING:  return FColor(255, 140,   0);  // Orange-yellow
+	case EAgentState::STEADY:    return FColor(  0, 180, 140);  // Green-blue
 	case EAgentState::PINNED:    return FColor::Blue;
 	case EAgentState::DEAD:      return FColor(128, 128, 128);  // Gray
 	default:                     return FColor::White;

@@ -17,6 +17,7 @@ namespace
 		EAgentState State;
 		uint8       TeamId;
 		uint8       SquadId;
+		uint8       FatigueLevel;   // 0=Fresh,5=Exhausted
 		FVector     Forward;   // facing direction — for flank detection
 	};
 
@@ -61,6 +62,7 @@ void UBattleMoraleProcessor::ConfigureQueries(const TSharedRef<FMassEntityManage
 	MoraleQuery.AddRequirement<FAgentStateFragment>(EMassFragmentAccess::ReadOnly);
 	MoraleQuery.AddRequirement<FMoraleFragment>(EMassFragmentAccess::ReadWrite);
 	MoraleQuery.AddRequirement<FFactionFragment>(EMassFragmentAccess::ReadOnly);
+	MoraleQuery.AddRequirement<FFatigueFragment>(EMassFragmentAccess::ReadOnly);
 	MoraleQuery.RegisterWithProcessor(*this);
 
 	OfficerQuery.Initialize(EntityManager);
@@ -120,6 +122,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		const auto Transforms = Ctx.GetFragmentView<FTransformFragment>();
 		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
 		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
+		const auto Fatigues   = Ctx.GetFragmentView<FFatigueFragment>();
 		const int32 N         = Ctx.GetNumEntities();
 		Snaps.Reserve(Snaps.Num() + N);
 		Positions.Reserve(Positions.Num() + N);
@@ -127,6 +130,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		{
 			Positions.Add(Transforms[i].GetTransform().GetLocation());
 			Snaps.Add({ States[i].State, Factions[i].TeamId, Factions[i].SquadId,
+				static_cast<uint8>(Fatigues[i].Level),
 				Transforms[i].GetTransform().GetUnitAxis(EAxis::X) });
 		}
 	});
@@ -154,7 +158,8 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		SquadAlive.FindOrAdd(S.SquadId)++;
 		if (S.State == EAgentState::ROUTING ||
 			S.State == EAgentState::RALLYING ||
-			S.State == EAgentState::SHAKEN)
+			S.State == EAgentState::SHAKEN   ||
+			S.State == EAgentState::WAVERING)
 			SquadBreaking.FindOrAdd(S.SquadId)++;
 	}
 	// Per-squad contagion gain: 0 until the breaking fraction reaches the
@@ -252,8 +257,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 						break;
 					}
 					case EAgentState::SHAKEN:
-						// A wavering neighbour unsettles you too, but far less than
-						// an outright router. Tight radius (StableRadius).
+					case EAgentState::WAVERING:
 						if (DistSq2D < FMath::Square(StableRadius))
 						{
 							const float Falloff = 1.f - FMath::Sqrt(DistSq2D) / StableRadius;
@@ -287,6 +291,7 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			Morale += StableBonus * DT;
 
 			// ── Officer effects — by SquadId (own officer only) ───────────
+			// MoraleBonus boosted from 1.0 to 4.0 (ETW: inspired=+6, adjusted to /s)
 			for (const FMoraleOfficerSnap& Off : Officers)
 			{
 				if (Off.SquadId != MySquad) continue;
@@ -298,6 +303,20 @@ void UBattleMoraleProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 
 				if (Off.bJustDied && DistSq < FMath::Square(2000.f))
 					Morale -= 30.f;
+			}
+
+			// ── Fatigue→morale penalty (ETW: ume_concerned_tired=-1, exhausted=-4) ──
+			{
+				float FatPenalty = 0.f;
+				switch (static_cast<EFatigueLevel>(Snaps[GlobalIdx].FatigueLevel))
+				{
+				case EFatigueLevel::Exhausted: FatPenalty = -4.f; break;
+				case EFatigueLevel::VeryTired: FatPenalty = -2.5f; break;
+				case EFatigueLevel::Tired:     FatPenalty = -1.5f; break;
+				case EFatigueLevel::Winded:    FatPenalty = -0.5f; break;
+				default: break;
+				}
+				Morale += FatPenalty * DT;
 			}
 
 			// ── Flank support / exposed flank ─────────────────────────────

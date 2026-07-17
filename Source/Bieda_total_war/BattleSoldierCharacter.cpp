@@ -54,6 +54,8 @@ ABattleSoldierCharacter::ABattleSoldierCharacter()
 		TEXT("/Game/Models/Soldier_Animated/AS_Die.AS_Die"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ShootStandFinder(
 		TEXT("/Game/Models/Soldier_Animated/AS_Shoot_Standing.AS_Shoot_Standing"));
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> ReloadFinder(
+		TEXT("/Game/Models/Soldier_Animated/AS_Reload.AS_Reload"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> KneelFinder(
 		TEXT("/Game/Models/Soldier_Animated/AS_Kneel.AS_Kneel"));
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> ShootKneelFinder(
@@ -65,6 +67,7 @@ ABattleSoldierCharacter::ABattleSoldierCharacter()
 	if (FleeFinder.Succeeded())        FleeAnim           = FleeFinder.Object;
 	if (DieFinder.Succeeded())         DieAnim            = DieFinder.Object;
 	if (ShootStandFinder.Succeeded())  ShootStandingAnim  = ShootStandFinder.Object;
+	if (ReloadFinder.Succeeded())      ReloadAnim         = ReloadFinder.Object;
 	if (KneelFinder.Succeeded())       KneelAnim          = KneelFinder.Object;
 	if (ShootKneelFinder.Succeeded())  ShootKneelingAnim  = ShootKneelFinder.Object;
 }
@@ -74,10 +77,13 @@ UAnimSequence* ABattleSoldierCharacter::GetSequenceForState(EAgentState State) c
 	switch (State)
 	{
 	case EAgentState::HOLDING:
-	case EAgentState::LOADING:
 	case EAgentState::SHAKEN:
+	case EAgentState::WAVERING:
+	case EAgentState::STEADY:
 	case EAgentState::PINNED:
 		return IdleAnim;
+	case EAgentState::LOADING:
+		return ReloadAnim;
 	case EAgentState::ADVANCING:
 		return MarchAnim;
 	case EAgentState::MELEE:

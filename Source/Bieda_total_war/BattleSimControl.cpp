@@ -54,3 +54,17 @@ void StepBattleSimTimeScale(int32 Dir)
 	Idx = FMath::Clamp(Idx + (Dir > 0 ? 1 : -1), 0, N - 1);
 	CVarBiedaTimeScale->Set(Steps[Idx], ECVF_SetByCode);
 }
+
+// ── Debug capsules ────────────────────────────────────────────────────────────
+static TAutoConsoleVariable<int32> CVarBiedaDebugCapsules(
+	TEXT("bieda.DebugCapsules"),
+	0,
+	TEXT("When 1, all squads render as engine cylinders instead of skeletal meshes.\n")
+	TEXT("Use this to isolate rendering cost from simulation cost. Set to 1 and\n")
+	TEXT("re-run SetupVisualization (next Tick)."),
+	ECVF_Default);
+
+bool BattleDebugCapsulesEnabled()
+{
+	return CVarBiedaDebugCapsules.GetValueOnAnyThread() != 0;
+}

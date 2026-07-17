@@ -3,8 +3,8 @@
 #include "MassExecutionContext.h"
 #include "BattleTypes.h"
 #include "BattleSpatialGrid.h"
-#include "BattleDebugProcessor.h"   // BiedaDebugDrawEnabled()
-#include "BattleSimControl.h"       // BattleSimPaused()
+#include "BattleDebugProcessor.h"
+#include "BattleSimControl.h"
 #include "BattleStats.h"
 #include "DrawDebugHelpers.h"
 
@@ -24,44 +24,87 @@ namespace
 		FVector ShooterPos;
 		FVector TargetPos;
 		bool    bHit;
-		float   DirShock = 0.f;   // extra instant morale hit from a flank/rear shot
+		float   DirShock = 0.f;
+		float   HPDamage = 0.f;
 	};
 
-	struct FMeleeDamageEvent
+	struct FMeleeHitEvent
 	{
 		FMassEntityHandle Target;
 		float             HPDamage;
 		float             MoraleShock;
+		int32             XHolds = 0;
+		float             Knockback = 0.f;
+		FVector           AttackDir;
 	};
 
-	constexpr float MeleeRange = 200.f;   // cm — melee contact distance
+	constexpr float MeleeRange = 200.f;
+	constexpr float RearHitDotThresh  =  0.5f;
+	constexpr float FrontHitDotThresh = -0.5f;
+	constexpr float FlankHitShock     = 3.f;
+	constexpr float RearHitShock      = 5.f;
+	constexpr float DirBonusFront = 0.f;
+	constexpr float DirBonusFlank = 8.f;
+	constexpr float DirBonusRear  = 15.f;
+	constexpr float HalfChanceDist = 2900.f;
+	constexpr float ProjectileArmorDivisor   = 1.f;
+	constexpr float ProjectileDefenseDivisor = 2.f;
+	constexpr float MinDamageFraction        = 0.15f;
+	constexpr float BaseMusketDamage = 60.f;
+	constexpr float BaseMeleeDamage  = 40.f;
+	constexpr float CloseMax = 1500.f;
+	constexpr float LongMax  = 3500.f;
+	constexpr float CloseDmg = 1.0f;
+	constexpr float LongDmg  = 0.65f;
+	constexpr float FarDmg   = 0.30f;
+	constexpr int32 HNtoXH_0 = -6;
+	constexpr int32 HNtoXH_1 =  0;
+	constexpr int32 HNtoXH_2 =  6;
+	constexpr int32 HNtoXH_3 = 12;
+	constexpr float KB[] = { 70.f, 90.f, 110.f, 150.f, 200.f };
+	constexpr float KD[] = { 30.f, 50.f,  60.f,  80.f, 100.f };
+	constexpr float DmgMult[] = { 0.5f, 0.8f, 1.0f, 1.3f, 1.7f };
+	constexpr float BlockRange     = 1200.f;
+	constexpr float BlockRangeSq   = BlockRange * BlockRange;
+	constexpr float CorridorHalf   = 55.f;
+	constexpr float CorridorHalfSq = CorridorHalf * CorridorHalf;
+	constexpr float MinForward     = 30.f;
 
-	// Directional hit shock — being hit from the flank/rear is more
-	// demoralizing than a hit you saw coming from the front (ETW:
-	// was_attacked_in_front=0 / _flank=-3 / _rear=-5, ratio ~1 : 1.7).
-	// FrontDotThresh/FlankDotThresh split the 180° arc facing the shooter
-	// into front (shooter roughly where you're looking) / flank / rear.
-	constexpr float RearHitDotThresh  =  0.5f;    // dot(AttackDir, TargetForward) above this = rear hit
-	constexpr float FrontHitDotThresh = -0.5f;    // below this = front hit; between = flank
-	constexpr float FlankHitShock     = 4.f;
-	constexpr float RearHitShock      = 8.f;
+	int32 XHoldsFromHN(float Attack, float Defense)
+	{
+		const int32 hn = FMath::RoundToInt(Attack - Defense);
+		if (hn <= HNtoXH_0) return 0;
+		if (hn <= HNtoXH_1) return 1;
+		if (hn <= HNtoXH_2) return 2;
+		if (hn <= HNtoXH_3) return 3;
+		return 4;
+	}
 
-	// Friendly line-of-fire blocking (militia for now): a soldier won't fire if
-	// an ally stands in the narrow corridor between him and his target — so a
-	// rear-rank man only shoots when the man in front of him is gone (a "wyrwa"
-	// gap) or he sees the enemy through a clear lane.
-	constexpr float FriendBlockRange     = 1200.f;                          // cm — only nearby ranks block
-	constexpr float FriendBlockRangeSq   = FriendBlockRange * FriendBlockRange;
-	constexpr float FriendCorridorHalf   = 55.f;                            // cm — body clearance half-width
-	constexpr float FriendCorridorHalfSq = FriendCorridorHalf * FriendCorridorHalf;
-	constexpr float FriendMinForward     = 30.f;                            // cm — ignore self / abreast
+	float DmgMultByDist(float D)
+	{
+		if (D <= CloseMax) return CloseDmg;
+		if (D <= LongMax)  return LongDmg;
+		return FarDmg;
+	}
+
+	float AccuracyCurve(float Base, float Dist)
+	{
+		if (Dist <= 0.f) return Base;
+		return Base * FMath::Pow(0.5f, Dist / HalfChanceDist);
+	}
+
+	float CalcDamage(float Base, float Armor, float Dfn, float ArmDiv, float DfnDiv)
+	{
+		const float Reduction = (Armor / ArmDiv) + (Dfn / DfnDiv);
+		return FMath::Max(Base * MinDamageFraction, Base - Reduction);
+	}
 }
 
 UBattleCombatProcessor::UBattleCombatProcessor()
 {
 	bAutoRegisterWithProcessingPhases = true;
 	ProcessingPhase = EMassProcessingPhase::PrePhysics;
-	bRequiresGameThreadExecution = true;   // DrawDebugLine + direct EntityManager access
+	bRequiresGameThreadExecution = true;
 
 	ExecutionOrder.ExecuteAfter.Add(FName(TEXT("BattleStateProcessor")));
 	ExecutionOrder.ExecuteBefore.Add(FName(TEXT("BattleOfficerProcessor")));
@@ -85,409 +128,341 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	SCOPE_CYCLE_COUNTER(STAT_BiedaCombat);
 	UWorld* World = GetWorld();
 
-	// -------------------------------------------------------------------
-	// Pass 0: snapshot positions, teams, states + entity handles
-	// -------------------------------------------------------------------
+	// ── Snapshot pass ──────────────────────────────────────────────────────────
 	TArray<FCombatSnap>       Snaps;
-	TArray<FVector>           Positions;
-	TArray<FVector>           Forwards;
+	TArray<FVector>           Positions, Forwards;
 	TArray<FMassEntityHandle> Handles;
 	TArray<bool>              ForceRunFlags;
+	TArray<float>             ArmorVals, DefenseVals;
 
 	CombatQuery.ForEachEntityChunk(Context,
-		[&Snaps, &Positions, &Forwards, &Handles, &ForceRunFlags](FMassExecutionContext& Ctx)
+		[&](FMassExecutionContext& Ctx)
 	{
-		const auto Transforms = Ctx.GetFragmentView<FTransformFragment>();
-		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
-		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
-		const auto Velocities = Ctx.GetFragmentView<FAgentVelocityFragment>();
-		const int32 N         = Ctx.GetNumEntities();
+		const auto Tr  = Ctx.GetFragmentView<FTransformFragment>();
+		const auto St  = Ctx.GetFragmentView<FAgentStateFragment>();
+		const auto Fa  = Ctx.GetFragmentView<FFactionFragment>();
+		const auto Ve  = Ctx.GetFragmentView<FAgentVelocityFragment>();
+		const auto Co  = Ctx.GetFragmentView<FAgentCombatFragment>();
+		const int32 N  = Ctx.GetNumEntities();
 
-		Snaps.Reserve(Snaps.Num() + N);
-		Positions.Reserve(Positions.Num() + N);
-		Forwards.Reserve(Forwards.Num() + N);
-		Handles.Reserve(Handles.Num() + N);
-		ForceRunFlags.Reserve(ForceRunFlags.Num() + N);
+		Snaps.Reserve(Snaps.Num()+N); Positions.Reserve(Positions.Num()+N);
+		Forwards.Reserve(Forwards.Num()+N); Handles.Reserve(Handles.Num()+N);
+		ForceRunFlags.Reserve(ForceRunFlags.Num()+N);
+		ArmorVals.Reserve(ArmorVals.Num()+N); DefenseVals.Reserve(DefenseVals.Num()+N);
 
 		for (int32 i = 0; i < N; ++i)
 		{
-			const FTransform& T = Transforms[i].GetTransform();
+			const FTransform& T = Tr[i].GetTransform();
 			Positions.Add(T.GetLocation());
 			Forwards.Add(T.GetUnitAxis(EAxis::X));
-			Snaps.Add({ Factions[i].TeamId, States[i].State });
+			Snaps.Add({ Fa[i].TeamId, St[i].State });
 			Handles.Add(Ctx.GetEntity(i));
-			ForceRunFlags.Add(Velocities[i].bForceRun);
+			ForceRunFlags.Add(Ve[i].bForceRun);
+			ArmorVals.Add(Co[i].MeleeDefense * 0.5f);
+			DefenseVals.Add(Co[i].MeleeDefense);
 		}
 	});
 
 	if (Snaps.IsEmpty()) return;
 
-	// PERF: handle → snapshot-index map for O(1) target lookup. The validation
-	// (AIMING) and target-position (FIRING) paths used to scan the whole Handles
-	// array linearly — O(n) per soldier = O(n^2) per frame (~millions of compares
-	// at 2000 agents). One map build is O(n); each lookup is O(1).
 	TMap<FMassEntityHandle, int32> HandleToIdx;
 	HandleToIdx.Reserve(Handles.Num());
 	for (int32 h = 0; h < Handles.Num(); ++h)
 		HandleToIdx.Add(Handles[h], h);
 
-	// Spatial grid — cell size ~half fire range for efficient lookups
 	FBattleSpatialGrid Grid;
 	Grid.Build(Positions, 2500.f);
 
-	// -------------------------------------------------------------------
-	// Pass 1: target acquisition + damage collection
-	// -------------------------------------------------------------------
-	TArray<FBattleShotEvent>    DamageEvents;
-	TArray<FMeleeDamageEvent>   MeleeDamageEvents;
+	// ── Combat pass ────────────────────────────────────────────────────────────
+	TArray<FBattleShotEvent>  ShotEvents;
+	TArray<FMeleeHitEvent>    MeleeEvents;
 	int32 GlobalIdx = 0;
 
 	CombatQuery.ForEachEntityChunk(Context, [&](FMassExecutionContext& Ctx)
 	{
-		const float DeltaTime = Ctx.GetDeltaTimeSeconds() * BattleSimTimeScale();
-		auto       Transforms = Ctx.GetMutableFragmentView<FTransformFragment>();
-		const auto States     = Ctx.GetFragmentView<FAgentStateFragment>();
-		auto       Combats    = Ctx.GetMutableFragmentView<FAgentCombatFragment>();
-		const auto Factions   = Ctx.GetFragmentView<FFactionFragment>();
-		const auto Fatigues   = Ctx.GetFragmentView<FFatigueFragment>();
+		const float DT = Ctx.GetDeltaTimeSeconds() * BattleSimTimeScale();
+		auto       Tr  = Ctx.GetMutableFragmentView<FTransformFragment>();
+		const auto St  = Ctx.GetFragmentView<FAgentStateFragment>();
+		auto       Co  = Ctx.GetMutableFragmentView<FAgentCombatFragment>();
+		const auto Fa  = Ctx.GetFragmentView<FFactionFragment>();
+		const auto Fg  = Ctx.GetFragmentView<FFatigueFragment>();
+		const auto Ve  = Ctx.GetFragmentView<FAgentVelocityFragment>();
 
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i, ++GlobalIdx)
 		{
-			const EAgentState MyState = States[i].State;
-			FAgentCombatFragment& CF  = Combats[i];
-			const uint8 MyTeam        = Factions[i].TeamId;
+			const EAgentState MyState = St[i].State;
+			FAgentCombatFragment& CF  = Co[i];
+			const uint8 MyTeam        = Fa[i].TeamId;
 			const FVector MyPos       = Positions[GlobalIdx];
-			const FVector MyForward   = Forwards[GlobalIdx];
+			const FVector MyFwd       = Forwards[GlobalIdx];
+			const bool bCharging      = (MyState == EAgentState::ADVANCING && Ve[i].bForceRun);
+			const bool bUseLaneCheck  = (CF.VolleyMode == EVolleyMode::FreeFire);
 
-			// Friendly line-of-fire blocking is gated by FIRE MODE, not unit type:
-			//   FreeFire  → ON  — each man fires on his own initiative, so only
-			//                     those with a clear lane to an enemy may shoot.
-			//                     A rear-rank soldier won't fire "through" 19 mates.
-			//   Volley    → OFF — the whole rank/company fires together on command;
-			//                     rear ranks firing past the front is the intended
-			//                     thin-red-line behaviour. UpdateVolley gates timing.
-			// Militia is always FreeFire → always lane-checked, as before.
-			const bool bUseLaneCheck = (CF.VolleyMode == EVolleyMode::FreeFire);
-
-			// ── AIMING: acquire / validate target ──────────────────────────
+			// ── AIMING ──────────────────────────────────────────────────────
 			if (MyState == EAgentState::AIMING)
 			{
-				const FVector MyForwardN = MyForward.GetSafeNormal2D();
-				const float   CosHalf    = FMath::Cos(
-					FMath::DegreesToRadians(CF.VisionHalfAngleDeg));
-
-				// — One grid pass: collect enemies (cone+range) and nearby allies —
-				TArray<int32, TInlineAllocator<24>> EnemyCand;
-				TArray<int32, TInlineAllocator<24>> Friends;   // same team, within block range
+				const FVector MyFwdN  = MyFwd.GetSafeNormal2D();
+				const float   CosHalf = FMath::Cos(FMath::DegreesToRadians(CF.VisionHalfAngleDeg));
+				TArray<int32, TInlineAllocator<24>> EnemyCand, Friends;
 
 				Grid.ForEachInRadius(MyPos, CF.FireRange, GlobalIdx,
-					[&](int32 j, float DistSq2D)
+					[&](int32 j, float DSq)
 				{
 					if (Snaps[j].State == EAgentState::DEAD) return;
-
 					if (Snaps[j].TeamId == MyTeam)
 					{
-						// Gather allies that could sit on a fire lane (militia only).
-						if (bUseLaneCheck && DistSq2D < FriendBlockRangeSq)
-							Friends.Add(j);
+						if (bUseLaneCheck && DSq < BlockRangeSq) Friends.Add(j);
 						return;
 					}
-
-					// Enemy — vision cone gate.
-					const FVector ToTarget = (Positions[j] - MyPos).GetSafeNormal2D();
-					if (FVector::DotProduct(MyForwardN, ToTarget) < CosHalf) return;
+					const FVector To = (Positions[j]-MyPos).GetSafeNormal2D();
+					if (FVector::DotProduct(MyFwdN, To) < CosHalf) return;
 					EnemyCand.Add(j);
 				});
 
-				// — Is the straight line to TgtPos blocked by an ally? ────────
-				auto LaneBlocked = [&](const FVector& TgtPos) -> bool
+				auto LaneBlocked = [&](const FVector& TP) -> bool
 				{
 					if (!bUseLaneCheck) return false;
-					const float lx = TgtPos.X - MyPos.X;
-					const float ly = TgtPos.Y - MyPos.Y;
-					const float laneLen = FMath::Sqrt(lx * lx + ly * ly);
-					if (laneLen < KINDA_SMALL_NUMBER) return false;
-					const float dx = lx / laneLen;
-					const float dy = ly / laneLen;
+					const float lx=TP.X-MyPos.X, ly=TP.Y-MyPos.Y;
+					const float len = FMath::Sqrt(lx*lx+ly*ly);
+					if (len < 1.f) return false;
+					const float dx=lx/len, dy=ly/len;
 					for (int32 f : Friends)
 					{
-						const float vx = Positions[f].X - MyPos.X;
-						const float vy = Positions[f].Y - MyPos.Y;
-						const float fwd = vx * dx + vy * dy;          // along the lane
-						if (fwd <= FriendMinForward || fwd >= laneLen) continue;
-						const float latSq = (vx * vx + vy * vy) - fwd * fwd; // perp distance²
-						if (latSq < FriendCorridorHalfSq) return true;       // ally on the line
+						const float vx=Positions[f].X-MyPos.X, vy=Positions[f].Y-MyPos.Y;
+						const float fwd = vx*dx+vy*dy;
+						if (fwd <= MinForward || fwd >= len) continue;
+						if ((vx*vx+vy*vy)-fwd*fwd < CorridorHalfSq) return true;
 					}
 					return false;
 				};
 
-				// — Locate current target in snapshot (O(1) map lookup) —
-				int32 TargetSnapIdx = INDEX_NONE;
+				int32 TgtIdx = -1;
+				if (CF.bHasAcquiredTarget)
+					if (const int32* p = HandleToIdx.Find(CF.TargetEntity))
+						TgtIdx = *p;
+
 				if (CF.bHasAcquiredTarget)
 				{
-					if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
-						TargetSnapIdx = *Found;
+					bool Ok = false;
+					if (TgtIdx>=0 && Snaps[TgtIdx].State!=EAgentState::DEAD)
+					{
+						const float DSq = (Positions[TgtIdx]-MyPos).SizeSquared2D();
+						if (DSq < FMath::Square(CF.FireRange) && !LaneBlocked(Positions[TgtIdx]))
+							Ok = true;
+					}
+					if (!Ok) { CF.bHasAcquiredTarget = false; TgtIdx = -1; }
 				}
 
-				// — Validate existing target: alive, in range, lane clear —
-				if (CF.bHasAcquiredTarget)
-				{
-					bool bStillValid = false;
-					if (TargetSnapIdx != INDEX_NONE &&
-						Snaps[TargetSnapIdx].State != EAgentState::DEAD)
-					{
-						const float DistSq = (Positions[TargetSnapIdx] - MyPos).SizeSquared2D();
-						if (DistSq < FMath::Square(CF.FireRange) &&
-							!LaneBlocked(Positions[TargetSnapIdx]))
-							bStillValid = true;
-					}
-					if (!bStillValid)
-					{
-						CF.bHasAcquiredTarget = false;
-						TargetSnapIdx = INDEX_NONE;
-					}
-				}
-
-				// — Acquire new target: spread fire toward the enemy ─────────
-				// Score each foe by how far off my aim line he sits (lateral
-				// delta from my own position along the front), plus a faint
-				// distance bias. Then, instead of always taking the single best
-				// (which makes a WIDE firing line dogpile one or two men when the
-				// target is NARROW — a militia blob), pick RANDOMLY among the few
-				// best-scoring candidates. The shots stay aimed at the enemy but
-				// scatter across whoever's there, so a thin target gets peppered
-				// all over instead of two poor souls turned into sieves.
 				if (!CF.bHasAcquiredTarget)
 				{
-					const FVector LatAxis(-MyForwardN.Y, MyForwardN.X, 0.f);
-					const float   MyLat = FVector::DotProduct(MyPos, LatAxis);
+					const FVector Lat(-MyFwdN.Y, MyFwdN.X, 0.f);
+					const float   MyLat = FVector::DotProduct(MyPos, Lat);
 
-					// Keep the K best (lowest-score) candidates. Line infantry fire in
-					// volleys and dogpile a narrow target hard, so they scatter over a
-					// WIDER pool (K=40) than militia (K=20). Fixed-size buffer = KMax.
-					constexpr int32 KMax = 40;
-					const int32 K = (CF.UnitType == EUnitType::LineInfantry) ? 40 : 20;
-					int32 BestIdx[KMax];
-					float BestScore[KMax];
-					int32 Found = 0;
-					for (int32 c = 0; c < K; ++c) { BestIdx[c] = INDEX_NONE; BestScore[c] = FLT_MAX; }
+					const int32 K = (CF.UnitType==EUnitType::LineInfantry) ? 40 : 20;
+					int32 Bi[40]; float Bs[40];
+					for (int32 c=0;c<K;++c){Bi[c]=-1;Bs[c]=FLT_MAX;}
+					int32 Found=0;
 
 					for (int32 j : EnemyCand)
 					{
-						if (LaneBlocked(Positions[j])) continue;   // ally in the way
-						const float EnemyLat = FVector::DotProduct(Positions[j], LatAxis);
-						const float Dist     = FMath::Sqrt((Positions[j] - MyPos).SizeSquared2D());
-						const float Score    = FMath::Abs(EnemyLat - MyLat) + 0.05f * Dist;
-
-						// Insertion into the small sorted top-K buffer.
-						if (Score < BestScore[K - 1])
+						if (LaneBlocked(Positions[j])) continue;
+						const float ELat = FVector::DotProduct(Positions[j],Lat);
+						const float Dist = FMath::Sqrt((Positions[j]-MyPos).SizeSquared2D());
+						const float Sc   = FMath::Abs(ELat-MyLat)+0.05f*Dist;
+						if (Sc < Bs[K-1])
 						{
-							int32 p = K - 1;
-							while (p > 0 && Score < BestScore[p - 1])
-							{
-								BestScore[p] = BestScore[p - 1];
-								BestIdx[p]   = BestIdx[p - 1];
-								--p;
-							}
-							BestScore[p] = Score;
-							BestIdx[p]   = j;
-							Found = FMath::Min(Found + 1, K);
+							int32 p=K-1; while(p>0 && Sc<Bs[p-1]){ Bs[p]=Bs[p-1];Bi[p]=Bi[p-1];--p; }
+							Bs[p]=Sc; Bi[p]=j; Found=FMath::Min(Found+1,K);
 						}
 					}
 
-					if (Found > 0)
+					if (Found>0)
 					{
-						const int32 Pick = BestIdx[FMath::RandRange(0, Found - 1)];
-						CF.TargetEntity       = Handles[Pick];
+						const int32 Pick = Bi[FMath::RandRange(0,Found-1)];
+						CF.TargetEntity = Handles[Pick];
 						CF.bHasAcquiredTarget = true;
-						TargetSnapIdx         = Pick;
+						TgtIdx = Pick;
 					}
 				}
 
-				// — Face the target + single-frame aiming line —
-				if (CF.bHasAcquiredTarget && TargetSnapIdx != INDEX_NONE)
+				if (CF.bHasAcquiredTarget && TgtIdx>=0)
 				{
-					const FVector ToTarget = (Positions[TargetSnapIdx] - MyPos).GetSafeNormal2D();
-					if (!ToTarget.IsNearlyZero())
+					const FVector To = (Positions[TgtIdx]-MyPos).GetSafeNormal2D();
+					if (!To.IsNearlyZero())
 					{
-						FTransform T = Transforms[i].GetTransform();
-						T.SetRotation(FRotationMatrix::MakeFromX(ToTarget).ToQuat());
-						Transforms[i].GetMutableTransform() = T;
+						FTransform T = Tr[i].GetTransform();
+						T.SetRotation(FRotationMatrix::MakeFromX(To).ToQuat());
+						Tr[i].GetMutableTransform() = T;
 					}
 					if (World && BiedaDebugDrawEnabled())
-					{
-						DrawDebugLine(World,
-							MyPos + FVector(0.f, 0.f, 75.f),
-							Positions[TargetSnapIdx] + FVector(0.f, 0.f, 75.f),
+						DrawDebugLine(World, MyPos+FVector(0,0,75), Positions[TgtIdx]+FVector(0,0,75),
 							FColor::Orange, false, -1.f, 0, 1.f);
-					}
 				}
 			}
-			// ── FIRING: roll accuracy, queue damage ────────────────────────
+			// ── FIRING: ETW accuracy curve + damage formula ────────────────
 			else if (MyState == EAgentState::FIRING && CF.bHasAcquiredTarget)
 			{
-				// Target position for the shot/debug line (O(1) map lookup)
-				FVector TargetPos = MyPos + MyForward * CF.FireRange;
-				int32   TargetIdx = INDEX_NONE;
-				if (const int32* Found = HandleToIdx.Find(CF.TargetEntity))
+				FVector TgtPos = MyPos + MyFwd * CF.FireRange;
+				int32   TgtIdx = -1;
+				if (const int32* p = HandleToIdx.Find(CF.TargetEntity))
+				{ TgtIdx = *p; TgtPos = Positions[TgtIdx]; }
+
+				const float Dist = (TgtPos-MyPos).Size2D();
+				float HitChance = AccuracyCurve(CF.Accuracy, Dist);
+
+				switch (Fg[i].Level)
 				{
-					TargetIdx = *Found;
-					TargetPos = Positions[TargetIdx];
+				case EFatigueLevel::Exhausted: HitChance*=0.50f; break;
+				case EFatigueLevel::VeryTired: HitChance*=0.65f; break;
+				case EFatigueLevel::Tired:     HitChance*=0.78f; break;
+				case EFatigueLevel::Winded:    HitChance*=0.88f; break;
+				case EFatigueLevel::Active:    HitChance*=0.95f; break;
+				default: break;
 				}
 
-				// Fatigue degrades accuracy: max -50% at fatigue=100
-				const float FatigueAccMult = FMath::Max(0.5f, 1.f - Fatigues[i].Fatigue * 0.005f);
-				const bool bHit = FMath::FRand() < CF.Accuracy * FatigueAccMult;
+				// WAVERING state penalty (-25% accuracy)
+				if (MyState == EAgentState::WAVERING)
+					HitChance *= 0.75f;
 
-				// Directional shock: a hit from the flank/rear rattles the victim
-				// more than one taken from the front (see RearHitShock/FlankHitShock).
-				float DirShock = 0.f;
-				if (bHit && TargetIdx != INDEX_NONE)
+				const bool bHit = FMath::FRand() < HitChance;
+				float DirShock=0.f, HPDamage=0.f;
+
+				if (bHit && TgtIdx>=0)
 				{
-					const FVector TargetForward = Forwards[TargetIdx].GetSafeNormal2D();
-					const FVector AttackDir     = (TargetPos - MyPos).GetSafeNormal2D();
-					const float   Dot           = FVector::DotProduct(AttackDir, TargetForward);
+					const FVector TgtFwd = Forwards[TgtIdx].GetSafeNormal2D();
+					const FVector AtkDir = (TgtPos-MyPos).GetSafeNormal2D();
+					const float Dot = FVector::DotProduct(AtkDir, TgtFwd);
 					if (Dot > RearHitDotThresh)       DirShock = RearHitShock;
 					else if (Dot > FrontHitDotThresh) DirShock = FlankHitShock;
+
+					const float RangeMult = DmgMultByDist(Dist);
+					HPDamage = CalcDamage(BaseMusketDamage*RangeMult,
+						ArmorVals[TgtIdx], DefenseVals[TgtIdx],
+						ProjectileArmorDivisor, ProjectileDefenseDivisor);
 				}
 
-				DamageEvents.Add({ CF.TargetEntity, MyPos, TargetPos, bHit, DirShock });
-
-				CF.bHasAcquiredTarget = false;   // shot fired — clear target
-			}
-			// ── Other states: clear stale target ───────────────────────────
-			else
-			{
+				ShotEvents.Add({ CF.TargetEntity, MyPos, TgtPos, bHit, DirShock, HPDamage });
 				CF.bHasAcquiredTarget = false;
 			}
+			else { CF.bHasAcquiredTarget = false; }
 
-			// ── Melee contact detection (every alive soldier) ───────────────
-			// Runs regardless of fire state. CombatProcessor sets bInMeleeContact;
-			// StateProcessor reads it next frame to transition into EAgentState::MELEE.
+			// ── Melee contact detection ─────────────────────────────────────
 			if (MyState != EAgentState::DEAD)
 			{
 				CF.bPrevMeleeContact = CF.bInMeleeContact;
 				CF.bInMeleeContact   = false;
 				Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float)
 				{
-					if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD)
+					if (Snaps[j].TeamId!=MyTeam && Snaps[j].State!=EAgentState::DEAD)
 						CF.bInMeleeContact = true;
 				});
 
-				// First contact while charging → morale shock burst to nearby enemies
-				if (!CF.bPrevMeleeContact && CF.bInMeleeContact && ForceRunFlags[GlobalIdx])
+				if (!CF.bPrevMeleeContact && CF.bInMeleeContact && (bCharging||ForceRunFlags[GlobalIdx]))
 				{
-					constexpr float ChargeShock = 15.f;
 					Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float)
 					{
-						if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD)
-							MeleeDamageEvents.Add({ Handles[j], 0.f, ChargeShock });
+						if (Snaps[j].TeamId!=MyTeam && Snaps[j].State!=EAgentState::DEAD)
+							MeleeEvents.Add({ Handles[j], 0.f, 8.f });
 					});
 				}
 			}
 
-			// ── MELEE state: deal periodic melee hits ───────────────────────
+			// ── MELEE: HN-based hit resolution (ETW style) ─────────────────
 			if (MyState == EAgentState::MELEE)
 			{
-				CF.MeleeTimer += DeltaTime;
-				if (CF.MeleeTimer >= CF.MeleeAttackRate)
+				CF.MeleeTimer += DT;
+				if (CF.MeleeTimer >= 0.8f)
 				{
 					CF.MeleeTimer = 0.f;
-					int32 NearestEnemy  = INDEX_NONE;
-					float NearestDistSq = FMath::Square(MeleeRange);
-					Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float DistSq2D)
+					int32 NearEn=-1; float NearDSq=FMath::Square(MeleeRange);
+					Grid.ForEachInRadius(MyPos, MeleeRange, GlobalIdx, [&](int32 j, float DSq2D)
 					{
-						if (Snaps[j].TeamId != MyTeam && Snaps[j].State != EAgentState::DEAD
-							&& DistSq2D < NearestDistSq)
-						{
-							NearestDistSq = DistSq2D;
-							NearestEnemy  = j;
-						}
+						if (Snaps[j].TeamId!=MyTeam && Snaps[j].State!=EAgentState::DEAD && DSq2D<NearDSq)
+						{ NearDSq=DSq2D; NearEn=j; }
 					});
-					if (NearestEnemy != INDEX_NONE)
+					if (NearEn>=0)
 					{
-						// Directional shock, same rule as ranged hits.
-						float DirShock = 0.f;
-						const FVector TargetForward = Forwards[NearestEnemy].GetSafeNormal2D();
-						const FVector AttackDir     = (Positions[NearestEnemy] - MyPos).GetSafeNormal2D();
-						const float   Dot           = FVector::DotProduct(AttackDir, TargetForward);
-						if (Dot > RearHitDotThresh)       DirShock = RearHitShock;
-						else if (Dot > FrontHitDotThresh) DirShock = FlankHitShock;
+						const float AtkVal = CF.MeleeAttack + FMath::FRand()*6.f
+							+ (bCharging ? CF.MeleeChargeBonus : 0.f);
+						const float DefVal = DefenseVals[NearEn] + FMath::FRand()*6.f;
 
-						MeleeDamageEvents.Add({ Handles[NearestEnemy], CF.MeleeDamage, DirShock });
+						const FVector TgtFwd = Forwards[NearEn].GetSafeNormal2D();
+						const FVector AtkDir = (Positions[NearEn]-MyPos).GetSafeNormal2D();
+						const float Dot = FVector::DotProduct(AtkDir, TgtFwd);
+						float DirB = DirBonusFront;
+						if (Dot > RearHitDotThresh)       DirB = DirBonusRear;
+						else if (Dot > FrontHitDotThresh) DirB = DirBonusFlank;
+
+						const int32 XH = XHoldsFromHN(AtkVal+DirB, DefVal);
+						CF.LastXHolds     = XH;
+						CF.LastKnockback  = KB[FMath::Clamp(XH,0,4)];
+						CF.bLastKnockdown = FMath::FRand()*100.f < KD[FMath::Clamp(XH,0,4)];
+
+						float Dmg = CalcDamage(BaseMeleeDamage*DmgMult[FMath::Clamp(XH,0,4)],
+							ArmorVals[NearEn], DefenseVals[NearEn], 2.f, 2.f);
+
+						float DirShk = 0.f;
+						if (Dot > RearHitDotThresh)       DirShk = RearHitShock;
+						else if (Dot > FrontHitDotThresh) DirShk = FlankHitShock;
+
+						MeleeEvents.Add({ Handles[NearEn], Dmg, DirShk, XH,
+							CF.LastKnockback, AtkDir });
 					}
 				}
 			}
 		}
 	});
 
-	// -------------------------------------------------------------------
-	// Pass 2: apply damage + debug shot lines
-	// -------------------------------------------------------------------
-	for (const FBattleShotEvent& Evt : DamageEvents)
+	// ── Apply ranged damage ────────────────────────────────────────────────────
+	for (const FBattleShotEvent& E : ShotEvents)
 	{
-		if (Evt.bHit && EntityManager.IsEntityValid(Evt.Target))
+		if (E.bHit && EntityManager.IsEntityValid(E.Target))
 		{
-			FAgentCombatFragment& TargetCF =
-				EntityManager.GetFragmentDataChecked<FAgentCombatFragment>(Evt.Target);
-
-			if (TargetCF.HP <= 0.f) continue;   // already dead (killed earlier this frame)
-
-			TargetCF.HP -= 100.f;
-
-			if (TargetCF.HP <= 0.f)
+			auto& TCF = EntityManager.GetFragmentDataChecked<FAgentCombatFragment>(E.Target);
+			if (TCF.HP <= 0.f) continue;
+			TCF.HP -= E.HPDamage;
+			if (TCF.HP <= 0.f)
 			{
-				FAgentStateFragment& TargetSF =
-					EntityManager.GetFragmentDataChecked<FAgentStateFragment>(Evt.Target);
-				TargetSF.State      = EAgentState::DEAD;
-				TargetSF.StateTimer = 0.f;
+				auto& TSF = EntityManager.GetFragmentDataChecked<FAgentStateFragment>(E.Target);
+				TSF.State = EAgentState::DEAD; TSF.StateTimer = 0.f;
 			}
-			else if (Evt.DirShock > 0.f)
+			else if (E.DirShock > 0.f)
 			{
-				FMoraleFragment& TargetMF =
-					EntityManager.GetFragmentDataChecked<FMoraleFragment>(Evt.Target);
-				TargetMF.Morale = FMath::Max(0.f, TargetMF.Morale - Evt.DirShock);
+				auto& TMF = EntityManager.GetFragmentDataChecked<FMoraleFragment>(E.Target);
+				TMF.Morale = FMath::Max(0.f, TMF.Morale - E.DirShock);
 			}
 		}
-
-		// Debug line: red = hit, yellow = miss.  Persists 0.3 s.
 		if (World && BiedaDebugDrawEnabled())
 		{
-			const FVector Start = Evt.ShooterPos + FVector(0.f, 0.f, 75.f);
-			const FVector End   = Evt.TargetPos  + FVector(0.f, 0.f, 75.f);
-			const FColor  Color = Evt.bHit ? FColor::Red : FColor(255, 200, 0);
-			const float   Thick = Evt.bHit ? 2.5f : 1.f;
-			DrawDebugLine(World, Start, End, Color, false, 0.3f, 0, Thick);
+			DrawDebugLine(World, E.ShooterPos+FVector(0,0,75), E.TargetPos+FVector(0,0,75),
+				E.bHit ? FColor::Red : FColor(255,200,0), false, 0.3f, 0, E.bHit ? 2.5f : 1.f);
 		}
 	}
 
-	// -------------------------------------------------------------------
-	// Pass 3: apply melee damage + charge morale shock
-	// -------------------------------------------------------------------
-	for (const FMeleeDamageEvent& Evt : MeleeDamageEvents)
+	// ── Apply melee damage + knockback ─────────────────────────────────────────
+	for (const FMeleeHitEvent& E : MeleeEvents)
 	{
-		if (!EntityManager.IsEntityValid(Evt.Target)) continue;
-
-		if (Evt.HPDamage > 0.f)
+		if (!EntityManager.IsEntityValid(E.Target)) continue;
+		if (E.HPDamage > 0.f)
 		{
-			FAgentCombatFragment& TargetCF =
-				EntityManager.GetFragmentDataChecked<FAgentCombatFragment>(Evt.Target);
-			if (TargetCF.HP <= 0.f) continue;
-			TargetCF.HP -= Evt.HPDamage;
-			if (TargetCF.HP <= 0.f)
+			auto& TCF = EntityManager.GetFragmentDataChecked<FAgentCombatFragment>(E.Target);
+			if (TCF.HP <= 0.f) continue;
+			TCF.HP -= E.HPDamage;
+			if (TCF.HP <= 0.f)
 			{
-				FAgentStateFragment& TargetSF =
-					EntityManager.GetFragmentDataChecked<FAgentStateFragment>(Evt.Target);
-				TargetSF.State      = EAgentState::DEAD;
-				TargetSF.StateTimer = 0.f;
+				auto& TSF = EntityManager.GetFragmentDataChecked<FAgentStateFragment>(E.Target);
+				TSF.State = EAgentState::DEAD; TSF.StateTimer = 0.f;
+			}
+			if (E.Knockback > 0.f)
+			{
+				auto& TVF = EntityManager.GetFragmentDataChecked<FAgentVelocityFragment>(E.Target);
+				TVF.Velocity += E.AttackDir * E.Knockback * 2.f;
 			}
 		}
-
-		if (Evt.MoraleShock > 0.f)
+		if (E.MoraleShock > 0.f)
 		{
-			FMoraleFragment& TargetMF =
-				EntityManager.GetFragmentDataChecked<FMoraleFragment>(Evt.Target);
-			TargetMF.Morale = FMath::Max(0.f, TargetMF.Morale - Evt.MoraleShock);
+			auto& TMF = EntityManager.GetFragmentDataChecked<FMoraleFragment>(E.Target);
+			TMF.Morale = FMath::Max(0.f, TMF.Morale - E.MoraleShock);
 		}
 	}
 }

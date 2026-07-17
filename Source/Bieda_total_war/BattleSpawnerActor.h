@@ -216,6 +216,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals", meta = (ClampMin = "0"))
 	float AnimatedActorRange = 6000.f;
 
+	/** When true, all soldiers render as engine cylinders (no skeletal meshes).
+	 *  Use this to isolate render cost from simulation cost when profiling.
+	 *  Toggle at runtime via console:  bieda.DebugCapsules 1  */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Visuals")
+	bool bUseDebugCapsules = false;
+
 	/**
 	 * Issue a move order with optional formation change.
 	 * Clears any active engagement.
@@ -391,4 +397,9 @@ private:
 
 	/** Draw fire-range arc and facing arrow (called from UpdateVisualization). */
 	void DrawFireRangeArc(const FMassEntityManager& EM);
+
+	/** When non-zero, overrides bUseDebugCapsules for runtime toggle. */
+	bool DebugCapsulesDesired() const;
+
+	bool bLastDebugState = false;
 };

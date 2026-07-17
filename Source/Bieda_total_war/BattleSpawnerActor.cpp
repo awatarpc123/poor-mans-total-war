@@ -124,6 +124,16 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
+	// Check for debug-capsule toggle at runtime (console var or property change)
+	{
+		const bool bDesired = DebugCapsulesDesired();
+		if (bDesired != bLastDebugState)
+		{
+			bLastDebugState = bDesired;
+			SetupVisualization();
+		}
+	}
+
 	// Simulation helpers freeze on tactical pause; visualization keeps drawing
 	// the frozen state so the player can pan around and issue orders. Their
 	// time-based logic (shock decay, volley gap) scales with game speed too.
@@ -421,15 +431,21 @@ void ABattleSpawnerActor::SpawnAgents()
 		{
 			CF.ReloadDuration  = SoldierReloadTime * FMath::RandRange(0.9f, 1.1f);
 			CF.Accuracy        = SoldierAccuracy   * FMath::RandRange(0.85f, 1.15f);
-			CF.ShakenThreshold = 30.f;   // steady — only wavers when badly hurt
 			CF.PanicThreshold  = 12.f;   // routs late
+			CF.ShakenThreshold = 25.f;   // heavy waver only when badly hurt
+			CF.WaverThreshold  = 42.f;   // mild waver under pressure
+			CF.ShakenRecover   = 35.f;
+			CF.WaverRecover    = 55.f;
 		}
 		else  // Militia
 		{
 			CF.ReloadDuration  = SoldierReloadTime * FMath::RandRange(0.8f, 1.2f);
 			CF.Accuracy        = SoldierAccuracy   * FMath::RandRange(0.75f, 1.25f);
-			CF.ShakenThreshold = 50.f;   // jumpy — wavers early
 			CF.PanicThreshold  = 30.f;   // routs sooner
+			CF.ShakenThreshold = 20.f;   // severe waver
+			CF.WaverThreshold  = 42.f;   // mild waver early
+			CF.ShakenRecover   = 30.f;
+			CF.WaverRecover    = 52.f;
 		}
 
 		FFactionFragment& FF = EM.GetFragmentDataChecked<FFactionFragment>(Entity);
@@ -1317,8 +1333,8 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 
 	const FMassEntityManager& EM = Subsystem->GetEntityManager();
 
-	// Count each state (array sized to EAgentState count: 11, incl. SHAKEN)
-	int32 StateCounts[11] = {};
+	// Count each state (array sized to EAgentState count: 13, incl. WAVERING, STEADY)
+	int32 StateCounts[13] = {};
 	for (const FMassEntityHandle& Entity : SpawnedEntities)
 	{
 		if (!EM.IsEntityValid(Entity)) continue;
@@ -1330,7 +1346,7 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 	// Find dominant
 	int32 MaxCount = 0;
 	EAgentState Dominant = EAgentState::HOLDING;
-	for (int32 s = 0; s < 11; ++s)
+	for (int32 s = 0; s < 13; ++s)
 	{
 		if (StateCounts[s] > MaxCount)
 		{
@@ -1349,6 +1365,8 @@ FString ABattleSpawnerActor::GetDominantStateString() const
 	case EAgentState::ROUTING:   return TEXT("PANIKA!");
 	case EAgentState::RALLYING:  return TEXT("Zbiera sie");
 	case EAgentState::SHAKEN:    return TEXT("Chwieje sie");
+	case EAgentState::WAVERING:  return TEXT("Niespokojny");
+	case EAgentState::STEADY:    return TEXT("Stabilny");
 	default:                     return TEXT("---");
 	}
 }
@@ -1891,6 +1909,15 @@ void ABattleSpawnerActor::SetupVisualization()
 	UStaticMesh* NcoMesh   = NCOMesh       ? NCOMesh.Get()       : SolMesh;
 	UStaticMesh* DrumMesh  = DrummerMesh   ? DrummerMesh.Get()   : SolMesh;
 
+	// When profiling: replace all detail meshes with a single fallback cylinder
+	if (bUseDebugCapsules || BattleDebugCapsulesEnabled())
+	{
+		SolMesh  = Fallback;
+		OffMesh  = Fallback;
+		NcoMesh  = Fallback;
+		DrumMesh = Fallback;
+	}
+
 	UMaterialInterface* NcoMat  = NCOMaterial      ? NCOMaterial.Get()      : SoldierMaterial.Get();
 	UMaterialInterface* DrumMat = DrummerMaterial  ? DrummerMaterial.Get()  : SoldierMaterial.Get();
 	UMaterialInterface* CorpMat = CorporalMaterial ? CorporalMaterial.Get() : SoldierMaterial.Get();
@@ -1901,6 +1928,9 @@ void ABattleSpawnerActor::SetupVisualization()
 	NCOHISM         = CreateHISM(TEXT("NCOHISM"),         NcoMesh, NcoMat);
 	DrummerHISM     = CreateHISM(TEXT("DrummerHISM"),     DrumMesh, DrumMat);
 	CorporalHISM    = CreateHISM(TEXT("CorporalHISM"),    SolMesh, CorpMat);
+
+	// Debug capsules already drawn by BattleDebugProcessor when bieda.Debug=1;
+	// visual meshes stay as cylinders so you see both.
 }
 
 void ABattleSpawnerActor::UpdateVisualization()
@@ -2149,4 +2179,9 @@ void ABattleSpawnerActor::DrawFireRangeArc(const FMassEntityManager& EM)
 		DrawDebugLine(World, PrevInner, Point, InnerColor, false, -1.f, 0, 1.5f);
 		PrevInner = Point;
 	}
+}
+
+bool ABattleSpawnerActor::DebugCapsulesDesired() const
+{
+	return bUseDebugCapsules || BattleDebugCapsulesEnabled();
 }
