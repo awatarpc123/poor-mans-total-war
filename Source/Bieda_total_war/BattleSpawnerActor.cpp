@@ -142,6 +142,7 @@ void ABattleSpawnerActor::Tick(float DeltaSeconds)
 		const float SimDelta = DeltaSeconds * BattleSimTimeScale();
 		UpdateEngagement();
 		UpdateVolley(SimDelta);
+		UpdateCountermarch();
 		UpdateStragglers();
 		UpdateCasualtyShock(SimDelta);
 	}
@@ -276,16 +277,16 @@ void ABattleSpawnerActor::SpawnAgents()
 	const FVector Base = GetActorLocation();
 
 	// RowSize: 0 = auto, otherwise use value from editor.
-	//   Line Infantry + bTwoRankLine → 2-rank-deep line (British "thin red line").
-	//   Otherwise → square-ish grid.
+	//   Line Infantry + NumRanksForLine → N-rank-deep line (2 = British "thin
+	//   red line", up to 4 for countermarch fire). Otherwise → square-ish grid.
 	int32 EffectiveRowSize;
 	if (RowSize > 0)
 	{
 		EffectiveRowSize = FMath::Clamp(RowSize, 1, NumAgents);
 	}
-	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
+	else if (UnitType == EUnitType::LineInfantry && NumRanksForLine > 1)
 	{
-		EffectiveRowSize = FMath::Max(1, FMath::CeilToInt(NumAgents / 2.f));
+		EffectiveRowSize = FMath::Max(1, FMath::CeilToInt(NumAgents / (float)NumRanksForLine));
 	}
 	else
 	{
@@ -609,9 +610,9 @@ void ABattleSpawnerActor::IssueMoveOrder(const FVector& NewWorldTarget, int32 In
 	{
 		LocalRowSize = CurrentRowSize;
 	}
-	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
+	else if (UnitType == EUnitType::LineInfantry && NumRanksForLine > 1)
 	{
-		LocalRowSize = FMath::Max(3, FMath::CeilToInt(NumAgents / 2.f));
+		LocalRowSize = FMath::Max(3, FMath::CeilToInt(NumAgents / (float)NumRanksForLine));
 		CurrentRowSize = LocalRowSize;
 	}
 	else
@@ -909,8 +910,8 @@ void ABattleSpawnerActor::IssueHaltOrder()
 	int32 Cols;
 	if (CurrentRowSize > 0)
 		Cols = FMath::Clamp(CurrentRowSize, 1, N);
-	else if (UnitType == EUnitType::LineInfantry && bTwoRankLine)
-		Cols = FMath::Max(1, FMath::CeilToInt(N / 2.f));
+	else if (UnitType == EUnitType::LineInfantry && NumRanksForLine > 1)
+		Cols = FMath::Max(1, FMath::CeilToInt(N / (float)NumRanksForLine));
 	else
 		Cols = FMath::Max(1, FMath::CeilToInt(FMath::Sqrt((float)N)));
 	const int32 Rows      = FMath::Max(1, FMath::CeilToInt((float)N / Cols));
@@ -1211,6 +1212,9 @@ float ABattleSpawnerActor::GetClosestSoldierDistSq(const FVector& WorldPos) cons
 	const FMassEntityManager& EM = Subsystem->GetEntityManager();
 
 	float Best = FLT_MAX;
+	FVector2D Mn(FLT_MAX, FLT_MAX), Mx(-FLT_MAX, -FLT_MAX);
+	bool bAny = false;
+
 	const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
 	for (int32 i = 0; i < SoldierCount; ++i)
 	{
@@ -1220,10 +1224,27 @@ float ABattleSpawnerActor::GetClosestSoldierDistSq(const FVector& WorldPos) cons
 		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
 		if (SF.State == EAgentState::DEAD) continue;
 
-		const FTransformFragment& TF = EM.GetFragmentDataChecked<FTransformFragment>(Entity);
-		const float DistSq = (TF.GetTransform().GetLocation() - WorldPos).SizeSquared2D();
+		const FVector Loc = EM.GetFragmentDataChecked<FTransformFragment>(Entity).GetTransform().GetLocation();
+		const float DistSq = (Loc - WorldPos).SizeSquared2D();
 		if (DistSq < Best) Best = DistSq;
+
+		Mn.X = FMath::Min(Mn.X, Loc.X); Mn.Y = FMath::Min(Mn.Y, Loc.Y);
+		Mx.X = FMath::Max(Mx.X, Loc.X); Mx.Y = FMath::Max(Mx.Y, Loc.Y);
+		bAny = true;
 	}
+
+	// Clicking anywhere INSIDE the formation's footprint counts as hitting this
+	// squad, not just within SelectionRadius of one soldier — otherwise a click
+	// landing in the gap between ranks/files (or between two adjacent squads),
+	// still visually "on" the block, fell through to a ground/move click.
+	constexpr float EdgeMargin = 150.f;   // slack past the outermost soldiers
+	if (bAny &&
+		WorldPos.X >= Mn.X - EdgeMargin && WorldPos.X <= Mx.X + EdgeMargin &&
+		WorldPos.Y >= Mn.Y - EdgeMargin && WorldPos.Y <= Mx.Y + EdgeMargin)
+	{
+		return 0.f;
+	}
+
 	return Best;
 }
 
@@ -1451,12 +1472,18 @@ void ABattleSpawnerActor::IssueEngageOrder(ABattleSpawnerActor* EnemySquad)
 	EngagedTarget = EnemySquad;
 	LastEngageEnemyPos = EnemySquad->GetFormationCenter();
 
-	// Compute approach position: stop at 75% of fire range from enemy
+	// Compute approach position: Fire stance stops at 75% of fire range and
+	// holds there to shoot; Charge stance closes all the way to melee range
+	// at a run instead. Previously there was only ever the Fire behavior —
+	// this is the stance toggle (HUD: "Ostrzał"/"Szarża").
 	const FVector MyCenter    = GetFormationCenter();
 	const FVector EnemyCenter = LastEngageEnemyPos;
 	const FVector ToEnemy     = (EnemyCenter - MyCenter).GetSafeNormal2D();
-	const float   StopDist    = SoldierFireRange * 0.75f;
+	const float   StopDist    = bChargeStance ? 150.f : FireEngageDistance;
 	const FVector EngagePos   = EnemyCenter - ToEnemy * StopDist;
+
+	if (bChargeStance)
+		SetForceRun(true);   // charge at run speed, not the marching pace
 
 	// Issue full move order (with propagation) — but DON'T clear engagement
 	// (IssueMoveOrder clears it, so we do the formation logic inline)
@@ -1606,7 +1633,7 @@ void ABattleSpawnerActor::UpdateEngagement()
 
 		// Lightweight re-order: just slide target positions, no propagation reset
 		const FVector ToEnemy     = (EnemyCenter - MyCenter).GetSafeNormal2D();
-		const float   StopDist   = SoldierFireRange * 0.75f;
+		const float   StopDist   = bChargeStance ? 150.f : FireEngageDistance;
 		const FVector EngagePos  = EnemyCenter - ToEnemy * StopDist;
 		const FVector FrontLineDir = FVector(ToEnemy.Y, -ToEnemy.X, 0.f);
 		const FQuat   FormRot    = FRotationMatrix::MakeFromX(FrontLineDir).ToQuat();
@@ -1868,6 +1895,130 @@ void ABattleSpawnerActor::UpdateVolley(float DeltaSeconds)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// Countermarch fire — per-file rank rotation
+// ═══════════════════════════════════════════════════════════════════════════════
+
+void ABattleSpawnerActor::UpdateCountermarch()
+{
+	if (VolleyMode != EVolleyMode::Countermarch) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMassEntitySubsystem* Subsystem = World->GetSubsystem<UMassEntitySubsystem>();
+	if (!Subsystem) return;
+	FMassEntityManager& EM = Subsystem->GetMutableEntityManager();
+
+	const int32 SoldierCount = FMath::Min(NumAgents, SpawnedEntities.Num());
+
+	// Collect anyone who just fired this frame (flag set by BattleStateProcessor
+	// the instant their FIRING duration elapses, gated there to FormationRow==0
+	// so only the current front-of-file ever reaches this point).
+	TArray<int32> FiredIdx;
+	for (int32 i = 0; i < SoldierCount; ++i)
+	{
+		const FMassEntityHandle Entity = SpawnedEntities[i];
+		if (!EM.IsEntityValid(Entity)) continue;
+		FAgentCombatFragment& CF = EM.GetFragmentDataChecked<FAgentCombatFragment>(Entity);
+		if (CF.bJustFiredCountermarch)
+		{
+			FiredIdx.Add(i);
+			CF.bJustFiredCountermarch = false;
+		}
+	}
+	if (FiredIdx.IsEmpty()) return;
+
+	// Group live soldier indices by FormationCol (their file) so each shooter's
+	// file-mates can be found without an O(n^2) scan per shot.
+	TMap<int32, TArray<int32>> ColToIndices;
+	for (int32 i = 0; i < SoldierCount; ++i)
+	{
+		const FMassEntityHandle Entity = SpawnedEntities[i];
+		if (!EM.IsEntityValid(Entity)) continue;
+		const FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(Entity);
+		if (SF.State == EAgentState::DEAD) continue;
+		const FAgentVelocityFragment& VF = EM.GetFragmentDataChecked<FAgentVelocityFragment>(Entity);
+		ColToIndices.FindOrAdd(VF.FormationCol).Add(i);
+	}
+
+	for (const int32 ShooterIdx : FiredIdx)
+	{
+		const FMassEntityHandle ShooterEntity = SpawnedEntities[ShooterIdx];
+		if (!EM.IsEntityValid(ShooterEntity)) continue;
+		if (EM.GetFragmentDataChecked<FAgentStateFragment>(ShooterEntity).State == EAgentState::DEAD) continue;
+
+		const int32 Col = EM.GetFragmentDataChecked<FAgentVelocityFragment>(ShooterEntity).FormationCol;
+		TArray<int32>* FileIndices = ColToIndices.Find(Col);
+
+		if (!FileIndices || FileIndices->Num() < 2)
+		{
+			// No file-mates left to rotate with (decimated file) — just reload
+			// in place rather than getting stuck waiting for a rear rank that
+			// no longer exists.
+			FAgentStateFragment& SF = EM.GetFragmentDataChecked<FAgentStateFragment>(ShooterEntity);
+			SF.State      = EAgentState::LOADING;
+			SF.StateTimer = 0.f;
+			continue;
+		}
+
+		// Sort this file front-to-back by current row (row 0 = the shooter,
+		// guaranteed — only row 0 is ever allowed to fire under Countermarch).
+		TArray<int32> Sorted = *FileIndices;
+		Sorted.Sort([&EM, this](int32 A, int32 B)
+		{
+			return EM.GetFragmentDataChecked<FAgentVelocityFragment>(SpawnedEntities[A]).FormationRow
+			     < EM.GetFragmentDataChecked<FAgentVelocityFragment>(SpawnedEntities[B]).FormationRow;
+		});
+
+		// Snapshot each file-mate's CURRENT slot (their target position, or
+		// their live position if they haven't been given one yet) before
+		// reassigning anything.
+		TArray<FVector> OldSlots;
+		OldSlots.Reserve(Sorted.Num());
+		for (const int32 Idx : Sorted)
+		{
+			const FMassEntityHandle E  = SpawnedEntities[Idx];
+			const FOrderFragment&   OF = EM.GetFragmentDataChecked<FOrderFragment>(E);
+			OldSlots.Add(OF.bHasTarget ? OF.TargetPosition
+				: EM.GetFragmentDataChecked<FTransformFragment>(E).GetTransform().GetLocation());
+		}
+
+		// Rotate the file: everyone who was behind the shooter steps forward
+		// one slot (into the position the man ahead of them just vacated);
+		// the shooter takes the last slot — the rear of their own file.
+		for (int32 k = 0; k < Sorted.Num(); ++k)
+		{
+			const FMassEntityHandle E  = SpawnedEntities[Sorted[k]];
+			FAgentVelocityFragment& VF = EM.GetFragmentDataChecked<FAgentVelocityFragment>(E);
+			FOrderFragment&         OF = EM.GetFragmentDataChecked<FOrderFragment>(E);
+			FAgentStateFragment&    SF = EM.GetFragmentDataChecked<FAgentStateFragment>(E);
+
+			if (k == 0)   // the shooter — always front-of-file, sorted first
+			{
+				VF.FormationRow   = Sorted.Num() - 1;
+				OF.TargetPosition = OldSlots.Last();
+				OF.bHasTarget     = true;
+				SF.State          = EAgentState::ADVANCING;
+				SF.StateTimer     = 0.f;
+			}
+			else
+			{
+				VF.FormationRow   = k - 1;
+				OF.TargetPosition = OldSlots[k - 1];
+				OF.bHasTarget     = true;
+				// Don't interrupt anyone mid-melee or mid-shot; everyone else
+				// (waiting/loading in place) just walks their short step up.
+				if (SF.State != EAgentState::AIMING && SF.State != EAgentState::FIRING
+					&& SF.State != EAgentState::MELEE && SF.State != EAgentState::DEAD)
+				{
+					SF.State      = EAgentState::ADVANCING;
+					SF.StateTimer = 0.f;
+				}
+			}
+		}
+	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Visualization (ISM)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -2073,11 +2224,30 @@ void ABattleSpawnerActor::UpdateVisualization()
 		if (DrumTs.Num() > 0) DrummerHISM->AddInstances(DrumTs, false, true);
 	}
 
-	// ── Fire range arc + facing arrow (debug only) ───────────────────────
-	if (bShowFireRange && BiedaDebugDrawEnabled())
+	// ── Fire range arc + facing arrow ─────────────────────────────────────
+	// This is a normal gameplay readout (Total War-style fire arc), not a
+	// perf-diagnostic overlay — it must NOT be gated behind bieda.Debug (that
+	// switch defaults OFF and is meant for the expensive per-soldier debug
+	// shapes). Show it whenever this squad is selected; bieda.Debug still
+	// forces it on for every squad when doing a full diagnostic pass.
+	if (bShowFireRange && (IsSelectedByCamera() || BiedaDebugDrawEnabled()))
 	{
 		DrawFireRangeArc(EM);
 	}
+}
+
+bool ABattleSpawnerActor::IsSelectedByCamera() const
+{
+	UWorld* World = GetWorld();
+	if (!World) return false;
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC) return false;
+	ABattleCameraPawn* Cam = Cast<ABattleCameraPawn>(PC->GetPawn());
+	if (!Cam) return false;
+	if (Cam->GetSelectedSpawner() == this) return true;
+	for (const TObjectPtr<ABattleSpawnerActor>& S : Cam->GetSelectedSpawners())
+		if (S == this) return true;
+	return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -47,6 +47,26 @@ namespace
 	constexpr float DirBonusFlank = 8.f;
 	constexpr float DirBonusRear  = 15.f;
 	constexpr float HalfChanceDist = 2900.f;
+
+	// ── Misfires (ETW: misfire_musket_flintlock/matchlock/percussion_cap) ──────
+	// ETW's own table lists 0.0 for flintlock/matchlock muskets (only cannons
+	// and percussion caps misfire in that data) — using that literal value
+	// would make this a no-op for our flintlock-era muskets. Using a small,
+	// visible flintlock-typical rate instead so the mechanic actually shows up.
+	constexpr float MusketMisfireChance = 0.05f;
+
+	// ── Cover (ETW: missile_cover_factor_none/slight/some/good/excellent =
+	// 0/3/8/12/16). No terrain/obstacle system exists yet to assign cover from,
+	// so this is proxied from FormationRow (0 = front rank): rear ranks are
+	// partially shielded by the men in front of them, a real firing-line
+	// effect and the only "cover" concept our simulation currently has data
+	// for. ETW's point values are folded into accuracy multipliers here.
+	constexpr float CoverMult[] = { 1.00f, 0.90f, 0.75f, 0.60f, 0.45f };
+
+	float CoverMultiplierForRow(int32 Row)
+	{
+		return CoverMult[FMath::Clamp(Row, 0, 4)];
+	}
 	constexpr float ProjectileArmorDivisor   = 1.f;
 	constexpr float ProjectileDefenseDivisor = 2.f;
 	constexpr float MinDamageFraction        = 0.15f;
@@ -133,6 +153,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 	TArray<FMassEntityHandle> Handles;
 	TArray<bool>              ForceRunFlags;
 	TArray<float>             ArmorVals, DefenseVals;
+	TArray<int32>             FormationRows;
 
 	CombatQuery.ForEachEntityChunk(Context,
 		[&](FMassExecutionContext& Ctx)
@@ -148,6 +169,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 		Forwards.Reserve(Forwards.Num()+N); Handles.Reserve(Handles.Num()+N);
 		ForceRunFlags.Reserve(ForceRunFlags.Num()+N);
 		ArmorVals.Reserve(ArmorVals.Num()+N); DefenseVals.Reserve(DefenseVals.Num()+N);
+		FormationRows.Reserve(FormationRows.Num()+N);
 
 		for (int32 i = 0; i < N; ++i)
 		{
@@ -159,6 +181,7 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 			ForceRunFlags.Add(Ve[i].bForceRun);
 			ArmorVals.Add(Co[i].MeleeDefense * 0.5f);
 			DefenseVals.Add(Co[i].MeleeDefense);
+			FormationRows.Add(Ve[i].FormationRow);
 		}
 	});
 
@@ -323,7 +346,13 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 				if (MyState == EAgentState::WAVERING)
 					HitChance *= 0.75f;
 
-				const bool bHit = FMath::FRand() < HitChance;
+				// Target's cover (rear-rank proxy — see CoverMultiplierForRow)
+				if (TgtIdx >= 0)
+					HitChance *= CoverMultiplierForRow(FormationRows[TgtIdx]);
+
+				// Misfire: weapon simply fails to discharge, independent of aim
+				const bool bMisfire = FMath::FRand() < MusketMisfireChance;
+				const bool bHit = !bMisfire && FMath::FRand() < HitChance;
 				float DirShock=0.f, HPDamage=0.f;
 
 				if (bHit && TgtIdx>=0)
@@ -341,9 +370,19 @@ void UBattleCombatProcessor::Execute(FMassEntityManager& EntityManager, FMassExe
 				}
 
 				ShotEvents.Add({ CF.TargetEntity, MyPos, TgtPos, bHit, DirShock, HPDamage });
-				CF.bHasAcquiredTarget = false;
+				// Deliberately NOT clearing bHasAcquiredTarget here: keep aiming at
+				// the same man through the next reload cycle so damage actually
+				// accumulates on him. The AIMING branch above already re-validates
+				// (alive / in range / not lane-blocked) every time it runs and
+				// re-picks if invalid — that's the only gate needed. Clearing here
+				// (and in the catch-all below, which used to run EVERY FRAME during
+				// the ~15s LOADING state) forced a fresh random pick from the
+				// 40-nearest pool every single volley, scattering hits across many
+				// different soldiers instead of concentrating fire — this was why
+				// shots/hits were non-zero but kills stayed near zero.
 			}
-			else { CF.bHasAcquiredTarget = false; }
+			// Any other state (LOADING, HOLDING, etc.): leave bHasAcquiredTarget as
+			// -is; see the comment above the FIRING branch for why it must persist.
 
 			// ── Melee contact detection ─────────────────────────────────────
 			if (MyState != EAgentState::DEAD)

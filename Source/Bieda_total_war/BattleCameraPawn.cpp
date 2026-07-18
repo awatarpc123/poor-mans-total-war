@@ -37,16 +37,49 @@ void ABattleCameraPawn::BeginPlay()
 		PC->SetInputMode(FInputModeGameAndUI());
 	}
 
-	// ── Position camera above the battlefield ────────────────────────────────
+	// ── Position camera above the PLAYER'S deploy zone, not the map centre ────
+	// Previously averaged every spawner (both sides), which lands the camera
+	// on the map centre — a no-man's-land the player hasn't deployed into yet.
+	// Prefer the player's own deploy zone (blue box) if a BattleManager exists;
+	// fall back to averaging only the player's (TeamId 0) spawners if not.
 	FVector CamTarget = FVector::ZeroVector;
-	int32 SpawnerCount = 0;
-	for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+	bool bFoundTarget = false;
+
+	for (TActorIterator<ABattleManager> ItMgr(GetWorld()); ItMgr; ++ItMgr)
 	{
-		CamTarget += It->GetActorLocation();
-		++SpawnerCount;
+		CamTarget = ItMgr->GetDeployZone(ItMgr->PlayerTeamId).GetCenter();
+		bFoundTarget = true;
+		break;
 	}
-	if (SpawnerCount > 0)
-		CamTarget /= static_cast<float>(SpawnerCount);
+
+	if (!bFoundTarget)
+	{
+		int32 SpawnerCount = 0;
+		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+		{
+			if (It->TeamId != 0) continue;   // player's own squads only
+			CamTarget += It->GetActorLocation();
+			++SpawnerCount;
+		}
+		if (SpawnerCount > 0)
+		{
+			CamTarget /= static_cast<float>(SpawnerCount);
+			bFoundTarget = true;
+		}
+	}
+
+	if (!bFoundTarget)
+	{
+		// Last resort: average everything (old behaviour) rather than sit at world origin.
+		int32 SpawnerCount = 0;
+		for (TActorIterator<ABattleSpawnerActor> It(GetWorld()); It; ++It)
+		{
+			CamTarget += It->GetActorLocation();
+			++SpawnerCount;
+		}
+		if (SpawnerCount > 0)
+			CamTarget /= static_cast<float>(SpawnerCount);
+	}
 
 	SetActorLocation(CamTarget + FVector(0.f, -2000.f, 3000.f));
 

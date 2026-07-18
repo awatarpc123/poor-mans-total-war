@@ -22,6 +22,7 @@ void UBattleStateProcessor::ConfigureQueries(const TSharedRef<FMassEntityManager
 	StateQuery.AddRequirement<FMoraleFragment>(EMassFragmentAccess::ReadWrite);
 	StateQuery.AddRequirement<FOrderFragment>(EMassFragmentAccess::ReadOnly);
 	StateQuery.AddRequirement<FAgentCombatFragment>(EMassFragmentAccess::ReadWrite);
+	StateQuery.AddRequirement<FAgentVelocityFragment>(EMassFragmentAccess::ReadOnly);
 	StateQuery.RegisterWithProcessor(*this);
 }
 
@@ -38,6 +39,7 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 		auto       Morales    = Ctx.GetMutableFragmentView<FMoraleFragment>();
 		const auto Orders     = Ctx.GetFragmentView<FOrderFragment>();
 		auto       Combats    = Ctx.GetMutableFragmentView<FAgentCombatFragment>();
+		const auto Velocities = Ctx.GetFragmentView<FAgentVelocityFragment>();
 
 		for (int32 i = 0; i < Ctx.GetNumEntities(); ++i)
 		{
@@ -45,6 +47,7 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 			FMoraleFragment&      MF = Morales[i];
 			const FOrderFragment& OF = Orders[i];
 			FAgentCombatFragment& CF = Combats[i];
+			const FAgentVelocityFragment& VF = Velocities[i];
 
 			if (SF.State == EAgentState::DEAD) continue;
 
@@ -102,6 +105,19 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 							SF.State      = EAgentState::AIMING;
 							SF.StateTimer = 0.f;
 						}
+						else if (CF.VolleyMode == EVolleyMode::Countermarch)
+						{
+							// No coordinator handshake for this mode: whoever currently
+							// occupies the front of their own file (row 0) just fires as
+							// soon as they're loaded — self-organizing, since the file
+							// rotation (UpdateCountermarch) keeps promoting the next man
+							// up to row 0 after each shot. Rows 1+ simply wait here.
+							if (VF.FormationRow == 0)
+							{
+								SF.State      = EAgentState::AIMING;
+								SF.StateTimer = 0.f;
+							}
+						}
 						else
 						{
 							CF.bVolleyReady = true;
@@ -141,6 +157,19 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 							SF.State      = EAgentState::AIMING;
 							SF.StateTimer = 0.f;
 						}
+						else if (CF.VolleyMode == EVolleyMode::Countermarch)
+						{
+							// No coordinator handshake for this mode: whoever currently
+							// occupies the front of their own file (row 0) just fires as
+							// soon as they're loaded — self-organizing, since the file
+							// rotation (UpdateCountermarch) keeps promoting the next man
+							// up to row 0 after each shot. Rows 1+ simply wait here.
+							if (VF.FormationRow == 0)
+							{
+								SF.State      = EAgentState::AIMING;
+								SF.StateTimer = 0.f;
+							}
+						}
 						else
 						{
 							CF.bVolleyReady = true;
@@ -171,6 +200,20 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 						SF.State      = EAgentState::AIMING;
 						SF.StateTimer = 0.f;
 					}
+					else if (CF.VolleyMode == EVolleyMode::Countermarch)
+					{
+						// Same self-organizing rule as HOLDING/WAVERING: fire the
+						// instant loaded IF currently front-of-file. Without this
+						// branch a Countermarch soldier falls into the bVolleyReady/
+						// bVolleySignal handshake below, which nothing ever signals
+						// for this mode — a permanent LOADING deadlock after the
+						// first (spawn-loaded) shot.
+						if (VF.FormationRow == 0)
+						{
+							SF.State      = EAgentState::AIMING;
+							SF.StateTimer = 0.f;
+						}
+					}
 					else
 					{
 						CF.bVolleyReady = true;
@@ -197,8 +240,19 @@ void UBattleStateProcessor::Execute(FMassEntityManager& EntityManager, FMassExec
 				if (SF.StateTimer >= CF.FireDuration)
 				{
 					CF.bMusketLoaded = false;
-					SF.State      = EAgentState::LOADING;
-					SF.StateTimer = 0.f;
+					if (CF.VolleyMode == EVolleyMode::Countermarch)
+					{
+						// Flagged for ABattleSpawnerActor::UpdateCountermarch(), which
+						// does the actual file-rotation + retarget next Tick; state
+						// stays FIRING for one extra frame until that happens (it will
+						// set ADVANCING once the new rear slot is assigned).
+						CF.bJustFiredCountermarch = true;
+					}
+					else
+					{
+						SF.State      = EAgentState::LOADING;
+						SF.StateTimer = 0.f;
+					}
 				}
 				break;
 

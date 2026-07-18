@@ -42,11 +42,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "0", ClampMax = "200"))
 	float FormationCurveStrength = 40.f;
 
-	/** Line Infantry only: when formation is auto (RowSize = 0), form a 2-rank-deep
-	 *  line — the British "thin red line". Ignored when RowSize is set explicitly
-	 *  or when drag-to-form overrides the row count. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
-	bool bTwoRankLine = true;
+	/** Line Infantry only: when formation is auto (RowSize = 0), form a line this many
+	 *  ranks deep (2 = British "thin red line", up to 4 for countermarch fire).
+	 *  Ignored when RowSize is set explicitly or when drag-to-form overrides the
+	 *  row count. 1 = no rank constraint (square-ish grid, same as militia). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit", meta = (ClampMin = "1", ClampMax = "4"))
+	int32 NumRanksForLine = 2;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Spawn")
 	int32 NumAgents = 50;
@@ -120,6 +121,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat")
 	float SoldierFireRange = 5000.f;
 
+	/** How close (cm) a Fire-stance squad halts from the enemy to open fire.
+	 *  MUST sit inside the effective damage band (< combat's LongMax ≈ 3500cm),
+	 *  otherwise shots land in the FarDmg=0.30 falloff and do almost nothing —
+	 *  at the old 3750cm (0.75× range) a hit did ~10 dmg vs 100 HP, so nobody
+	 *  died. 1800cm keeps them in the LongDmg band (~0.65×) where volleys are
+	 *  actually lethal while still firing at a visible musket distance. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat", meta = (ClampMin = "300"))
+	float FireEngageDistance = 1800.f;
+
 	/** Half-angle of the vision/fire cone (degrees). 90 = semicircle (180° FOV). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Combat", meta = (ClampMin = "10", ClampMax = "180"))
 	float VisionHalfAngleDeg = 90.f;
@@ -170,6 +180,16 @@ public:
 	/** Show fire range arc and facing arrow for this squad. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Debug")
 	bool bShowFireRange = true;
+
+	// ── Engagement stance ────────────────────────────────────────────────────
+	/** false (default) = Fire: IssueEngageOrder stops the squad at ~75% of fire
+	 *  range and holds there to shoot. true = Charge: closes all the way to
+	 *  melee range at a run instead of stopping to fire. Toggled per-squad from
+	 *  the HUD ("Ostrzał"/"Szarża") so the player controls whether clicking an
+	 *  enemy means "hold and shoot" or "close for melee" — previously there was
+	 *  only ever the Fire behavior, with no way to deliberately charge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Unit")
+	bool bChargeStance = false;
 
 	// ── Visual representation (ISM) ─────────────────────────────────────────
 	/** Mesh for soldiers. If nullptr, uses engine cylinder placeholder. */
@@ -284,6 +304,7 @@ public:
 	// ── Runtime commands (called from UI / keyboard) ────────────────────────
 	void SetVolleyModeRuntime(EVolleyMode NewMode);
 	void SetForceRun(bool bRun);
+	void SetChargeStance(bool bCharge) { bChargeStance = bCharge; }
 
 	/** Force-run flag: all soldiers use RunSpeed regardless of distance to slot. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Battle|Unit")
@@ -345,9 +366,19 @@ private:
 	void ClearFaceTarget();
 
 	// ── Volley coordination ─────────────────────────────────────────────────
-	int32 CurrentVolleyRank = 0;   // for RankFire: which row fires next
-	float VolleyRankTimer   = 0.f; // RankFire: countdown gap between rank volleys
+	int32 CurrentVolleyRank = 0;   // for RankFire/Countermarch: which row fires next
+	float VolleyRankTimer   = 0.f; // RankFire/Countermarch: countdown gap between rank volleys
 	void UpdateVolley(float DeltaSeconds);
+
+	// ── Countermarch fire ────────────────────────────────────────────────────
+	// Historically (Maurice-of-Nassau-style drill): only the front rank of a
+	// file has a clear shot, so after firing it retires to the rear of its own
+	// file — walking there via the normal ADVANCING/TargetPosition system —
+	// while every other rank in that file steps forward one slot, self-
+	// promoting the next man to front. Fully decentralized: no row-wide sync
+	// needed, each file cycles independently as soon as its front man fires
+	// (see BattleStateProcessor's Countermarch branch, gated on FormationRow==0).
+	void UpdateCountermarch();
 
 	// ── Straggler detection ─────────────────────────────────────────────────
 	// Flags soldiers that have fallen far behind the formation centroid so
@@ -397,6 +428,9 @@ private:
 
 	/** Draw fire-range arc and facing arrow (called from UpdateVisualization). */
 	void DrawFireRangeArc(const FMassEntityManager& EM);
+
+	/** True if this squad is the primary selection or part of a multi-select. */
+	bool IsSelectedByCamera() const;
 
 	/** When non-zero, overrides bUseDebugCapsules for runtime toggle. */
 	bool DebugCapsulesDesired() const;

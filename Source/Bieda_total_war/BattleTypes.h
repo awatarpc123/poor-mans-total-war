@@ -20,6 +20,7 @@ enum class EVolleyMode : uint8
 	FreeFire     UMETA(DisplayName = "Free Fire"),
 	SquadVolley  UMETA(DisplayName = "Squad Volley"),
 	RankFire     UMETA(DisplayName = "Rank Fire"),
+	Countermarch UMETA(DisplayName = "Countermarch Fire"),
 };
 
 // ── Fatigue level (ETW: 6 levels, scale 0-28800) ────────────────────────────
@@ -169,6 +170,16 @@ struct BIEDA_TOTAL_WAR_API FAgentCombatFragment : public FMassFragment
 	EVolleyMode VolleyMode   = EVolleyMode::FreeFire;
 	bool bVolleyReady        = false;   // soldier finished loading, waiting for signal
 	bool bVolleySignal       = false;   // coordinator says FIRE (set by spawner Tick)
+
+	// Countermarch fire: set the instant this soldier finishes a shot (FIRING
+	// duration elapsed) while VolleyMode==Countermarch. Consumed once per frame
+	// by ABattleSpawnerActor::UpdateCountermarch(), which — with access to the
+	// whole squad's entity list — reassigns this soldier's FormationRow/Col
+	// slot to the rear of their file and sends them there (ADVANCING), then
+	// clears the flag. Kept here rather than computed inline in
+	// BattleStateProcessor because that processor only sees one entity at a
+	// time and can't do the whole-file rank shuffle by itself.
+	bool bJustFiredCountermarch = false;
 
 	// Musket starts LOADED at spawn — a unit marches into battle with a charged
 	// piece, so its first shot skips the long reload (HOLDING → AIMING straight

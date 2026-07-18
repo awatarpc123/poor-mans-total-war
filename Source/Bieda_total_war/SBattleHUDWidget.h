@@ -199,6 +199,15 @@ public:
 										{TEXT("Swobodny"), 3, false},
 										{TEXT("Salwa"),    4, false},
 										{TEXT("Rzędami"), 5, false},
+										{TEXT("Kontrmarsz"), 7, false},
+									})
+								]
+
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 4.f, 12.f, 4.f)
+								[
+									MakeCmdGroup(TEXT("Postawa"), {
+										{TEXT("Ostrzał"), 8, false},
+										{TEXT("Szarża"),  9, false},
 									})
 								]
 							]
@@ -881,6 +890,9 @@ private:
 		case 4: S->SetVolleyModeRuntime(EVolleyMode::SquadVolley); break;
 		case 5: S->SetVolleyModeRuntime(EVolleyMode::RankFire); break;
 		case 6: S->IssueHaltOrder(); break;
+		case 7: S->SetVolleyModeRuntime(EVolleyMode::Countermarch); break;
+		case 8: S->SetChargeStance(false); break;
+		case 9: S->SetChargeStance(true); break;
 		}
 	}
 
@@ -895,6 +907,9 @@ private:
 		case 3: return S->VolleyMode == EVolleyMode::FreeFire;
 		case 4: return S->VolleyMode == EVolleyMode::SquadVolley;
 		case 5: return S->VolleyMode == EVolleyMode::RankFire;
+		case 7: return S->VolleyMode == EVolleyMode::Countermarch;
+		case 8: return !S->bChargeStance;
+		case 9: return S->bChargeStance;
 		default: return false;
 		}
 	}

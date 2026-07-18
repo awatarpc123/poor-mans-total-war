@@ -57,11 +57,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "1000"))
 	float BattlefieldRadius = 20000.f;
 
-	/** Full map size (cm), square. Default = musket range (5000) * 2 * 10 = 100000.
-	 *  This is ALSO the battlefield boundary: routers who cross it desert. Deploy
-	 *  zones are derived from it (2/3 of the width, 1/5 of the length per side). */
+	/** Full map size (cm), square. Was 100000 (musket range 5000 * 2 * 10); halved
+	 *  to 50000 for a tighter battlefield. This is ALSO the battlefield boundary:
+	 *  routers who cross it desert. Deploy zones AND both armies' spawn positions
+	 *  are derived from it (2/3 of the width, 1/5 of the length per side) — no
+	 *  other coordinates need adjusting when this changes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Battle|Field", meta = (ClampMin = "1000"))
-	float MapSize = 100000.f;
+	float MapSize = 50000.f;
 
 	/** World-space deploy zone (Z ignored) for a side. Player's is at the -X edge,
 	 *  enemy's at +X; width = 2/3 of MapSize (along Y), depth = 1/5 (along X). */
